@@ -2,7 +2,7 @@
 
 Debug-Paket und Debug-Werkzeuge fuer die Stiebel-Eltron-Waermepumpe (Elster-CAN-Bus) mit ESPHome.
 
-Lizenz: noch offen.
+Lizenz: GPL-3.0, siehe [LICENSE](LICENSE). Die Elster-Tabellen und -Logik gehen auf ha-stiebel-control (GPLv3) und Jürg Müller (CAN-Progs, GPL) zurück.
 
 ## 1. Paket fuer die Produktiv-Firmware
 
