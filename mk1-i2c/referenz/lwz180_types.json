@@ -44,6 +44,22 @@
       "signed": true,
       "confirmed": false
     },
+    "0x02": {
+      "name": "Lüfterstufe Einstellung (0-3)",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "confirmed": true,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log 2026-10-30: 02 6/6, 05 6/6, 69 3/3, 6d 6/7 gleich Display-Stufe, nur Bursts bei Stufenwechsel, 02 0,4-1,5 s nach Display (6d meist früher)"
+    },
+    "0x05": {
+      "name": "Lüfterstufe Einstellung (0-3)",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "confirmed": true,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log 2026-10-30: 02 6/6, 05 6/6, 69 3/3, 6d 6/7 gleich Display-Stufe, nur Bursts bei Stufenwechsel, 02 0,4-1,5 s nach Display (6d meist früher)"
+    },
     "0x06": {
       "name": "I9 Temperatur Aussenluft",
       "unit": "°C",
@@ -71,6 +87,22 @@
       "scale": 0.1,
       "signed": true,
       "confirmed": false
+    },
+    "0x0a": {
+      "name": "unbekannt, korreliert mit Drehzahl",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log: 604-2431, alle ca. 4,1 s"
+    },
+    "0x0b": {
+      "name": "unbekannt, korreliert mit Drehzahl",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log: 392-1717, alle ca. 4,1 s"
     },
     "0x0e": {
       "name": "I12 rel. Feuchte Aussenluft",
@@ -100,6 +132,22 @@
       "signed": true,
       "confirmed": false
     },
+    "0x12": {
+      "name": "Volumenstrom Soll Zuluft",
+      "unit": "m³/h",
+      "scale": 1,
+      "signed": false,
+      "confirmed": true,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log: 90/120/175 = P7/P8/P9, nur bei Stufenwechsel"
+    },
+    "0x13": {
+      "name": "Volumenstrom Soll Abluft",
+      "unit": "m³/h",
+      "scale": 1,
+      "signed": false,
+      "confirmed": true,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); wie 0x12, ca. 60 ms später"
+    },
     "0x14": {
       "name": "I15 Antrieb Zuluftventilator",
       "unit": "%",
@@ -121,40 +169,77 @@
       "signed": true,
       "confirmed": false
     },
+    "0x1a": {
+      "name": "Aktuelle Stunde",
+      "unit": "h",
+      "scale": 1,
+      "signed": false,
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); auf unserem Bus nicht gesehen"
+    },
     "0x1e": {
       "name": "P6",
       "unit": "m3/h",
       "scale": 1,
       "signed": true,
-      "confirmed": false
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180; auf unserem Bus nicht gesehen"
     },
     "0x1f": {
       "name": "P7",
       "unit": "m3/h",
       "scale": 1,
       "signed": true,
-      "confirmed": false
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180; auf unserem Bus nicht gesehen"
     },
     "0x20": {
       "name": "P8",
       "unit": "m3/h",
       "scale": 1,
       "signed": true,
-      "confirmed": false
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180; auf unserem Bus nicht gesehen"
     },
     "0x21": {
       "name": "P9",
       "unit": "m3/h",
       "scale": 1,
       "signed": true,
-      "confirmed": false
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180; auf unserem Bus nicht gesehen"
+    },
+    "0x35": {
+      "name": "Fühlerwiderstand Abluft",
+      "unit": "Ω",
+      "scale": 0.1,
+      "signed": false,
+      "confirmed": true,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log: 1032-1054 Ω, passt zu Typ 09 (Fortluft) auf ca. 0,2 K, PT1000; Zuordnung Abluft/Fortluft offen"
+    },
+    "0x36": {
+      "name": "Fühlerwiderstand Zuluft",
+      "unit": "Ω",
+      "scale": 0.1,
+      "signed": false,
+      "confirmed": true,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log: 1063-1074 Ω, passt zu Typ 07 (Zuluft) auf ca. 0,2 K, PT1000"
+    },
+    "0x49": {
+      "name": "Bypass aktiv (1/0)",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); auf unserem Bus nicht gesehen"
     },
     "0x4d": {
       "name": "P10",
       "unit": "Pa",
       "scale": 1,
       "signed": true,
-      "confirmed": false
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180; auf unserem Bus nicht gesehen"
     },
     "0x50": {
       "name": "I21 Betriebszeit Luefter",
@@ -175,21 +260,24 @@
       "unit": "Pa",
       "scale": 1,
       "signed": true,
-      "confirmed": false
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180; auf unserem Bus nicht gesehen"
     },
     "0x54": {
       "name": "P12",
       "unit": "Pa",
       "scale": 1,
       "signed": true,
-      "confirmed": false
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180; auf unserem Bus nicht gesehen"
     },
     "0x55": {
       "name": "P13",
       "unit": "Pa",
       "scale": 1,
       "signed": true,
-      "confirmed": false
+      "confirmed": false,
+      "note": "PR #2 kdarnok/lwz180; auf unserem Bus nicht gesehen"
     },
     "0x5a": {
       "name": "I4 Filterstandzeit",
@@ -197,6 +285,22 @@
       "scale": 1,
       "signed": true,
       "confirmed": false
+    },
+    "0x69": {
+      "name": "Lüfterstufe Einstellung (0-3)",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "confirmed": true,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log 2026-10-30: 02 6/6, 05 6/6, 69 3/3, 6d 6/7 gleich Display-Stufe, nur Bursts bei Stufenwechsel, 02 0,4-1,5 s nach Display (6d meist früher)"
+    },
+    "0x6d": {
+      "name": "Lüfterstufe Einstellung (0-3)",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "confirmed": true,
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log 2026-10-30: 02 6/6, 05 6/6, 69 3/3, 6d 6/7 gleich Display-Stufe, nur Bursts bei Stufenwechsel, 02 0,4-1,5 s nach Display (6d meist früher)"
     }
   },
   "keys": {
@@ -218,5 +322,6 @@
       "crc_ok": true,
       "note": "abgeleitet aus Sketch (Taste 5 = menu), nicht mitgeschnitten"
     }
-  ]
+  ],
+  "source_pr2": "https://github.com/kdarnok/lwz180/pull/2 (KKSzymanowski), eingearbeitet 2026-11-08, mit eigener Log-Prüfung"
 }
