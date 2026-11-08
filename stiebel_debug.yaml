@@ -1,0 +1,49 @@
+# stiebel_debug.yaml - Debug-Paket fuer die Waermepumpen-Firmware (CAN-RX-Stream, Sniffer).
+#
+# Zweck: Frames des Elster-CAN-Busses mitschneiden und per MQTT ausgeben. Nur Lesepfad, der
+# Sniffer ist standardmaessig AUS und wird ueber stiebel-debug/cmd/sniff eingeschaltet.
+#
+# Einbindung in die Firmware-YAML:
+#   packages:
+#     stiebel_debug: github://bastard-GIT/stiebel-debug/stiebel_debug.yaml@main
+#
+# Voraussetzungen:
+#   - Waermepumpen-Firmware mit den Hook-Makros STIEBEL_DEBUG_RX / STIEBEL_DEBUG_TX
+#     (Fork bastard-GIT/ha-stiebel-control, Branch wpla07). Ohne -DSTIEBEL_DEBUG sind die Makros leer.
+#   - Komponenten mqtt (wird ueber ::esphome::mqtt::global_mqtt_client genutzt, keine feste id noetig),
+#     interval und esp-idf mit TWAI.
+#
+# MQTT-Topics (Format siehe mk1-debug/INTERFACES.md):
+#   stiebel-debug/rx            Batch empfangener Frames (hoechstens alle 50 ms)
+#   stiebel-debug/status        Zaehler/Status alle 5 s
+#   stiebel-debug/availability  online (retained), wird alle 5 s und bei MQTT-Connect erneuert
+#   stiebel-debug/cmd/sniff     Kommando: {"on":true,"ids":["0x180"],"types":[2]}, leere Listen = alles
+
+esphome:
+  includes:
+    - stiebel_debug
+  build_flags:
+    - "-DSTIEBEL_DEBUG"
+
+mqtt:
+  on_connect:
+    - lambda: |-
+        if (::esphome::mqtt::global_mqtt_client != nullptr)
+          ::esphome::mqtt::global_mqtt_client->publish("stiebel-debug/availability", "online", 6, 1, true);
+  on_message:
+    - topic: stiebel-debug/cmd/sniff
+      then:
+        - lambda: |-
+            dbgrx_on_command("sniff", x);
+
+interval:
+  # rx-Batch aus dem Ringpuffer (hoechstens alle 50 ms)
+  - interval: 50ms
+    then:
+      - lambda: |-
+          dbgrx_flush();
+  # Status auf stiebel-debug/status
+  - interval: 5s
+    then:
+      - lambda: |-
+          dbgrx_publish_status();

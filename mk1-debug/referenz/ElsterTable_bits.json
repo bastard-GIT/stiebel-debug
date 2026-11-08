@@ -1,0 +1,2295 @@
+{
+  "format_version": 1,
+  "description": "Elster-Signaltabelle fuer Stiebel-Eltron-Waermepumpen (CAN-Bus), konvertiert aus ElsterTable.h. Lesehilfe fuer Agenten: ElsterTable.README.md.",
+  "source": {
+    "file": "_reference/stiebel-test/c-code/ElsterTable.h",
+    "also_used": [
+      "_reference/stiebel-test/c-code/KElsterTable.cpp",
+      "_reference/stiebel-test/c-code/heatingpump.h"
+    ],
+    "license": "LGPL-3.0",
+    "copyright": [
+      "2023 Bastian Stahmer",
+      "2014 Juerg Mueller, CH-5524 (http://juerg5524.ch/list_data.php)"
+    ],
+    "disclaimer": "Die Tabelle ist laut Quelle im Aufbau; nicht alle Indizes sind korrekt und muessen vor produktivem Einsatz geprueft werden (z.B. per ComfortSoft-Protokollierung)."
+  },
+  "enums": {
+    "poll": [
+      {
+        "name": "pl_off",
+        "value": 0,
+        "interval_s": null,
+        "meaning": "kein automatisches Polling"
+      },
+      {
+        "name": "pl_boot",
+        "value": 1,
+        "interval_s": null,
+        "meaning": "einmalig beim Boot lesen"
+      },
+      {
+        "name": "pl_1s",
+        "value": 2,
+        "interval_s": 1,
+        "meaning": "alle 1 s lesen"
+      },
+      {
+        "name": "pl_10s",
+        "value": 3,
+        "interval_s": 10,
+        "meaning": "alle 10 s lesen"
+      },
+      {
+        "name": "pl_60s",
+        "value": 4,
+        "interval_s": 60,
+        "meaning": "alle 60 s lesen"
+      }
+    ]
+  },
+  "types": [
+    {
+      "id": 0,
+      "name": "et_default",
+      "signed": true,
+      "scale": 1,
+      "decode": "int16 (signed), dezimal",
+      "encode": "Ganzzahl -32767..65535 -> uint16",
+      "writable": true,
+      "example": {
+        "raw": "0xfffe",
+        "text": "-2"
+      }
+    },
+    {
+      "id": 1,
+      "name": "et_dec_val",
+      "signed": true,
+      "scale": 0.1,
+      "decode": "int16 (signed) / 10, 1 Nachkommastelle",
+      "encode": "wert*10 (abgeschnitten), Bereich +-32767",
+      "writable": true,
+      "example": {
+        "raw": "0x00d2",
+        "text": "21.0"
+      }
+    },
+    {
+      "id": 2,
+      "name": "et_cent_val",
+      "signed": true,
+      "scale": 0.01,
+      "decode": "int16 (signed) / 100, 2 Nachkommastellen",
+      "encode": "wert*100, Bereich +-32767",
+      "writable": true,
+      "example": {
+        "raw": "0x0096",
+        "text": "1.50"
+      }
+    },
+    {
+      "id": 3,
+      "name": "et_mil_val",
+      "signed": true,
+      "scale": 0.001,
+      "decode": "int16 (signed) / 1000, 3 Nachkommastellen",
+      "encode": "wert*1000, Bereich +-32767",
+      "writable": true,
+      "example": {
+        "raw": "0x03e8",
+        "text": "1.000"
+      }
+    },
+    {
+      "id": 4,
+      "name": "et_byte",
+      "signed": true,
+      "scale": 1,
+      "decode": "NUR Low-Byte (raw & 0xFF) als int8 (signed)",
+      "encode": "Ganzzahl 0..255",
+      "writable": true,
+      "example": {
+        "raw": "0x0005",
+        "text": "5"
+      }
+    },
+    {
+      "id": 5,
+      "name": "et_bool",
+      "signed": false,
+      "scale": 1,
+      "decode": "0x0001 -> 'on', 0x0000 -> 'off', sonst '?'",
+      "encode": "'on' -> 0x0001, 'off' -> 0x0000",
+      "writable": true,
+      "example": {
+        "raw": "0x0001",
+        "text": "on"
+      }
+    },
+    {
+      "id": 6,
+      "name": "et_little_bool",
+      "signed": false,
+      "scale": 1,
+      "decode": "0x0100 -> 'on', 0x0000 -> 'off', sonst '?'",
+      "encode": "'on' -> 0x0100, 'off' -> 0x0000",
+      "writable": true,
+      "example": {
+        "raw": "0x0100",
+        "text": "on"
+      }
+    },
+    {
+      "id": 7,
+      "name": "et_double_val",
+      "signed": false,
+      "scale": 1,
+      "decode": "raw uint16, formatiert mit 3 Nachkommastellen (nur 16 Bit, kein echtes 32-Bit-Double)",
+      "encode": null,
+      "writable": false,
+      "example": {
+        "raw": "0x04d2",
+        "text": "1234.000"
+      }
+    },
+    {
+      "id": 8,
+      "name": "et_triple_val",
+      "signed": false,
+      "scale": 1,
+      "decode": "raw uint16, formatiert mit 6 Nachkommastellen (nur 16 Bit)",
+      "encode": null,
+      "writable": false,
+      "example": {
+        "raw": "0x04d2",
+        "text": "1234.000000"
+      }
+    },
+    {
+      "id": 9,
+      "name": "et_little_endian",
+      "signed": false,
+      "scale": 1,
+      "decode": "Bytes tauschen, dann uint16: (raw>>8) + 256*(raw&0xFF)",
+      "encode": "Ganzzahl -> Bytes tauschen",
+      "writable": true,
+      "example": {
+        "raw": "0x0100",
+        "text": "1"
+      }
+    },
+    {
+      "id": 10,
+      "name": "et_betriebsart",
+      "signed": false,
+      "scale": 1,
+      "decode": "nur wenn Low-Byte==0 und High-Byte<=6: betriebsart_list[High-Byte].name, sonst '?'",
+      "encode": "Name per Praefix-Match gegen betriebsart_list (von hinten nach vorn) -> Listenindex als High-Byte",
+      "writable": true,
+      "example": {
+        "raw": "0x0200",
+        "text": "Programmbetrieb"
+      }
+    },
+    {
+      "id": 11,
+      "name": "et_zeit",
+      "signed": false,
+      "scale": 1,
+      "decode": "Low-Byte = Stunde, High-Byte = Minute; 'HH:MM'",
+      "encode": "'H:M' -> (min<<8)+hour; hour<24, min<60",
+      "writable": true,
+      "example": {
+        "raw": "0x1e0d",
+        "text": "13:30"
+      }
+    },
+    {
+      "id": 12,
+      "name": "et_datum",
+      "signed": false,
+      "scale": 1,
+      "decode": "High-Byte = Tag, Low-Byte = Monat; 'DD.MM.'",
+      "encode": "'D.M.' -> (tag<<8)+monat; Tag 1-31, Monat 1-12, Plausibilitaet je Monat",
+      "writable": true,
+      "example": {
+        "raw": "0x1405",
+        "text": "20.05."
+      }
+    },
+    {
+      "id": 13,
+      "name": "et_time_domain",
+      "signed": false,
+      "scale": 1,
+      "decode": "raw&0x8080 -> 'not used time domain'; sonst Start=High-Byte, Ende=Low-Byte, jeweils in Viertelstunden: 'HH:MM-HH:MM'",
+      "encode": "'H:M-H:M' -> ((4*h1+m1/15)<<8) + (4*h2+m2/15), Start<Ende; leerer String -> 0x8080",
+      "writable": true,
+      "example": {
+        "raw": "0x1c40",
+        "text": "07:00-16:00"
+      }
+    },
+    {
+      "id": 14,
+      "name": "et_dev_nr",
+      "signed": false,
+      "scale": 1,
+      "decode": "raw>=0x80 -> '--', sonst raw+1",
+      "encode": null,
+      "writable": false,
+      "example": {
+        "raw": "0x0000",
+        "text": "1"
+      }
+    },
+    {
+      "id": 15,
+      "name": "et_err_nr",
+      "signed": false,
+      "scale": 1,
+      "decode": "Lookup in error_list; unbekannt -> 'ERR <dezimal>'",
+      "encode": null,
+      "writable": false,
+      "example": {
+        "raw": "0x0004",
+        "text": "Hochdruck"
+      }
+    },
+    {
+      "id": 16,
+      "name": "et_dev_id",
+      "signed": false,
+      "scale": 1,
+      "decode": "'<High-Byte>-<Low-Byte 2-stellig>'",
+      "encode": null,
+      "writable": false,
+      "example": {
+        "raw": "0x0201",
+        "text": "2-01"
+      }
+    }
+  ],
+  "can_members": [
+    {
+      "name": "KESSEL",
+      "enum_name": "cm_kessel",
+      "can_id": "0x180",
+      "read_id": [
+        "0x31",
+        "0x00"
+      ],
+      "write_id": [
+        "0x30",
+        "0x00"
+      ],
+      "description": "Kessel/Heizungsregler-Knoten; liefert u.a. Aussentemperatur, Puffer, Vorlauf, PROGRAMMSCHALTER"
+    },
+    {
+      "name": "SPEICHER",
+      "enum_name": "cm_speicher",
+      "can_id": "0x201",
+      "read_id": [
+        "0x41",
+        "0x01"
+      ],
+      "write_id": [
+        "0x40",
+        "0x01"
+      ],
+      "description": "Warmwasserspeicher"
+    },
+    {
+      "name": "ATEZ",
+      "enum_name": "cm_atez",
+      "can_id": "0x280",
+      "read_id": [
+        "0x51",
+        "0x00"
+      ],
+      "write_id": [
+        "0x50",
+        "0x00"
+      ]
+    },
+    {
+      "name": "BEDIENMODUL_1",
+      "enum_name": "cm_bedienmodul_1",
+      "can_id": "0x300",
+      "read_id": [
+        "0x61",
+        "0x00"
+      ],
+      "write_id": [
+        "0x60",
+        "0x00"
+      ]
+    },
+    {
+      "name": "BEDIENMODUL_2",
+      "enum_name": "cm_bedienmodul_2",
+      "can_id": "0x301",
+      "read_id": [
+        "0x61",
+        "0x01"
+      ],
+      "write_id": [
+        "0x60",
+        "0x01"
+      ]
+    },
+    {
+      "name": "BEDIENMODUL_3",
+      "enum_name": "cm_bedienmodul_3",
+      "can_id": "0x302",
+      "read_id": [
+        "0x61",
+        "0x02"
+      ],
+      "write_id": [
+        "0x60",
+        "0x02"
+      ]
+    },
+    {
+      "name": "BEDIENMODUL_4",
+      "enum_name": "cm_bedienmodul_4",
+      "can_id": "0x303",
+      "read_id": [
+        "0x61",
+        "0x03"
+      ],
+      "write_id": [
+        "0x60",
+        "0x03"
+      ]
+    },
+    {
+      "name": "RAUMFERNFUEHLER",
+      "enum_name": "cm_raumfernfuehler",
+      "can_id": "0x400",
+      "read_id": [
+        "0x00",
+        "0x00"
+      ],
+      "write_id": [
+        "0x00",
+        "0x00"
+      ],
+      "description": "Nicht ansprechbar (Read/Write-ID 00 00)"
+    },
+    {
+      "name": "MANAGER",
+      "enum_name": "cm_manager",
+      "can_id": "0x480",
+      "read_id": [
+        "0x91",
+        "0x00"
+      ],
+      "write_id": [
+        "0x90",
+        "0x00"
+      ],
+      "description": "Hauptregler (WPM)"
+    },
+    {
+      "name": "WPUMPE",
+      "enum_name": "cm_wpumpe",
+      "can_id": "0x514",
+      "read_id": [
+        "0xa1",
+        "0x14"
+      ],
+      "write_id": [
+        "0xa0",
+        "0x14"
+      ],
+      "description": "Waermepumpen-Modul; Kaeltekreis, Verdichter, Energiezaehler"
+    },
+    {
+      "name": "HEIZMODUL",
+      "enum_name": "cm_heizmodul",
+      "can_id": "0x500",
+      "read_id": [
+        "0xa1",
+        "0x00"
+      ],
+      "write_id": [
+        "0xa0",
+        "0x00"
+      ]
+    },
+    {
+      "name": "BUSKOPPLER",
+      "enum_name": "cm_buskoppler",
+      "can_id": "0x580",
+      "read_id": [
+        "0xb1",
+        "0x00"
+      ],
+      "write_id": [
+        "0xb0",
+        "0x00"
+      ]
+    },
+    {
+      "name": "MISCHERMODUL_1",
+      "enum_name": "cm_mischermodul_1",
+      "can_id": "0x600",
+      "read_id": [
+        "0xc1",
+        "0x00"
+      ],
+      "write_id": [
+        "0xc0",
+        "0x00"
+      ]
+    },
+    {
+      "name": "MISCHERMODUL_2",
+      "enum_name": "cm_mischermodul_2",
+      "can_id": "0x601",
+      "read_id": [
+        "0xc1",
+        "0x01"
+      ],
+      "write_id": [
+        "0xc0",
+        "0x01"
+      ],
+      "description": "Heizkreis-Mischer; liefert HK_*-Signale"
+    },
+    {
+      "name": "MISCHERMODUL_3",
+      "enum_name": "cm_mischermodul_3",
+      "can_id": "0x602",
+      "read_id": [
+        "0xc1",
+        "0x02"
+      ],
+      "write_id": [
+        "0xc0",
+        "0x02"
+      ]
+    },
+    {
+      "name": "MISCHERMODUL_4",
+      "enum_name": "cm_mischermodul_4",
+      "can_id": "0x603",
+      "read_id": [
+        "0xc1",
+        "0x03"
+      ],
+      "write_id": [
+        "0xc0",
+        "0x03"
+      ]
+    },
+    {
+      "name": "ESPCLIENT",
+      "enum_name": "cm_espclient",
+      "can_id": "0x680",
+      "read_id": [
+        "0xd1",
+        "0x00"
+      ],
+      "write_id": [
+        "0xd0",
+        "0x00"
+      ],
+      "description": "Eigener Knoten (ESP32); Absender-ID aller selbst gesendeten Frames"
+    },
+    {
+      "name": "FREMDGERAET",
+      "enum_name": "cm_fremdgeraet",
+      "can_id": "0x700",
+      "read_id": [
+        "0xe1",
+        "0x00"
+      ],
+      "write_id": [
+        "0xe0",
+        "0x00"
+      ]
+    },
+    {
+      "name": "DCF_MODUL",
+      "enum_name": "cm_dcf_modul",
+      "can_id": "0x780",
+      "read_id": [
+        "0xf1",
+        "0x00"
+      ],
+      "write_id": [
+        "0xf0",
+        "0x00"
+      ]
+    },
+    {
+      "name": "FES",
+      "enum_name": "cm_neue_id",
+      "can_id": "0x100",
+      "read_id": [
+        "0x21",
+        "0x00"
+      ],
+      "write_id": [
+        "0x20",
+        "0x00"
+      ],
+      "description": "In der Quelle als 'neue ID' ergaenzt; liefert Uhrzeit/Datum-Teilwerte"
+    },
+    {
+      "name": "OTHER",
+      "enum_name": "cm_other",
+      "can_id": "0x000",
+      "read_id": [
+        "0x01",
+        "0x00"
+      ],
+      "write_id": [
+        "0x00",
+        "0x00"
+      ],
+      "description": "Fallback fuer unbekannte CAN-IDs"
+    }
+  ],
+  "frame_format": {
+    "bus": {
+      "type": "CAN 2.0A (11-bit Standard-ID, kein Extended)",
+      "bitrate_bps": 20000,
+      "dlc": 7,
+      "own_can_id": "0x680",
+      "own_member": "ESPCLIENT"
+    },
+    "sender_id": "Der CAN-Identifier eines Frames ist die ID des SENDERS (0x680 bei eigenen Requests, Owner-ID bei Antworten).",
+    "data_layout_short_index": {
+      "applies_when": "index <= 0x00FF",
+      "bytes": [
+        "target_id_0",
+        "target_id_1",
+        "index_lo",
+        "value_hi",
+        "value_lo",
+        "0x00",
+        "0x00"
+      ]
+    },
+    "data_layout_long_index": {
+      "applies_when": "index >= 0x0100",
+      "bytes": [
+        "target_id_0",
+        "target_id_1",
+        "0xFA",
+        "index_hi",
+        "index_lo",
+        "value_hi",
+        "value_lo"
+      ]
+    },
+    "target_id": "Beim Senden: read_id (Lesen) bzw. write_id (Schreiben) des Ziel-Members aus can_members. Das untere Nibble von data[0] ist die Nachrichtenart.",
+    "read_request": "Wert-Bytes = 00 00.",
+    "write_request": "Wert = encode(type, text) als uint16 big-endian in value_hi/value_lo.",
+    "decode_response": "Wenn data[2]==0xFA: index=(data[3]<<8)|data[4], value=(data[5]<<8)|data[6]; sonst index=data[2], value=(data[3]<<8)|data[4]. Wert mit der type-Regel aus types dekodieren. Index nicht in signals -> Name 'UNK_0xXXXX', type et_default.",
+    "message_type": {
+      "extract": "data[0] & 0x0F",
+      "values": {
+        "0": "write",
+        "1": "read",
+        "2": "response",
+        "3": "ack",
+        "4": "write ack",
+        "5": "write respond",
+        "6": "system",
+        "7": "system respond"
+      }
+    },
+    "receiver_id": {
+      "formula": "((data[0] & 0xF0) << 3) | data[1]",
+      "note": "Die Quelle (processCanMessage) maskiert data[1] mit 0x0F; das ergibt fuer WPUMPE 0x504 statt 0x514. Obige Formel stimmt fuer alle can_members."
+    },
+    "examples": [
+      {
+        "title": "Read PROGRAMMSCHALTER (0x0112) von KESSEL",
+        "can_id": "0x680",
+        "data": "31 00 fa 01 12 00 00"
+      },
+      {
+        "title": "Read WW_SOLLTEMPERATUR (0x0003) von SPEICHER",
+        "can_id": "0x680",
+        "data": "41 01 03 00 00 00 00"
+      },
+      {
+        "title": "Write PROGRAMMSCHALTER = Komfortbetrieb (0x0300) an KESSEL",
+        "can_id": "0x680",
+        "data": "30 00 fa 01 12 03 00"
+      },
+      {
+        "title": "Antwort KESSEL -> ESP, PROGRAMMSCHALTER = Programmbetrieb (aus den Regeln konstruiert, nicht mitgeschnitten)",
+        "can_id": "0x180",
+        "data": "d2 00 fa 01 12 02 00"
+      }
+    ]
+  },
+  "signals": [
+    {
+      "name": "INDEX_NOT_FOUND",
+      "index": "0x0000",
+      "index_int": 0,
+      "type": "et_default",
+      "owner": null,
+      "owner_name": null,
+      "poll": "pl_off",
+      "sentinel": true
+    },
+    {
+      "name": "WW_SOLLTEMPERATUR",
+      "index": "0x0003",
+      "index_int": 3,
+      "type": "et_dec_val",
+      "owner": "0x201",
+      "owner_name": "SPEICHER",
+      "poll": "pl_60s",
+      "comment": "AH: 0x201 @done",
+      "marked_done": true
+    },
+    {
+      "name": "AUSSENTEMP",
+      "index": "0x000c",
+      "index_int": 12,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "AH: 0x180 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WW_KOMFORT_TEMPERATUR",
+      "index": "0x0013",
+      "index_int": 19,
+      "type": "et_dec_val",
+      "owner": "0x201",
+      "owner_name": "SPEICHER",
+      "poll": "pl_60s",
+      "comment": "AH: 0x201 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WP_RUECKLAUFTEMP",
+      "index": "0x0016",
+      "index_int": 22,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WW_ISTTEMPERATUR",
+      "index": "0x000e",
+      "index_int": 14,
+      "type": "et_dec_val",
+      "owner": "0x201",
+      "owner_name": "SPEICHER",
+      "poll": "pl_off",
+      "comment": "AH: 0x201 @done",
+      "marked_done": true
+    },
+    {
+      "name": "HK_PUFFERISTTEMPERATUR",
+      "index": "0x0078",
+      "index_int": 120,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "AH: 0x180 @done",
+      "marked_done": true
+    },
+    {
+      "name": "INITIALISIERUNG_??",
+      "index": "0x00fe",
+      "index_int": 254,
+      "type": "et_little_endian",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "AH: 0x480 (master) -> all @done",
+      "marked_done": true
+    },
+    {
+      "name": "PROGRAMMSCHALTER",
+      "index": "0x0112",
+      "index_int": 274,
+      "type": "et_betriebsart",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_60s",
+      "additional_owners": [
+        "0x201",
+        "0x301"
+      ],
+      "comment": "@todo: die Einstellmöglichkeiten rausfinden ; multi-owner: 0x180,0x201,0x301",
+      "notes": [
+        "PROGRAMMSCHALTER:",
+        "Positive Antwort von {0x180, 0x201, 0x301}",
+        "Negative Antwort von {0x100, 0x302, 0x303} -255",
+        "Notbetrieb     0x0000",
+        "Bereitschaft   0x0100",
+        "Automatik      0x0200",
+        "Tagbetrieb     0x0300",
+        "Absenkbetrieb  0x0400",
+        "Warmwasser     0x0500"
+      ]
+    },
+    {
+      "name": "BIVALENZTEMPERATUR_HZG",
+      "index": "0x01ac",
+      "index_int": 428,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "negative Werte // AH: 0x180 @done",
+      "marked_done": true
+    },
+    {
+      "name": "BIVALENZTEMPERATUR_WW",
+      "index": "0x01ad",
+      "index_int": 429,
+      "type": "et_dec_val",
+      "owner": null,
+      "owner_name": null,
+      "poll": "pl_off"
+    },
+    {
+      "name": "EINSATZGRENZE_HZG",
+      "index": "0x01ae",
+      "index_int": 430,
+      "type": "et_dec_val",
+      "owner": null,
+      "owner_name": null,
+      "poll": "pl_off",
+      "comment": "0x9000 -> AUS"
+    },
+    {
+      "name": "BIVALENZALTERNATIVTEMPERATUR_WW",
+      "index": "0x01af",
+      "index_int": 431,
+      "type": "et_dec_val",
+      "owner": null,
+      "owner_name": null,
+      "poll": "pl_off",
+      "comment": "0x9000 ????? EINSATZGRENZE_WW ????"
+    },
+    {
+      "name": "HK_PUFFERSOLLTEMPERATUR",
+      "index": "0x01d5",
+      "index_int": 469,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "AH: 0x180 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WP_VORLAUFTEMPERATUR",
+      "index": "0x01d6",
+      "index_int": 470,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "AH: 0x180 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WP_HEISSGAS_TEMPERATUR",
+      "index": "0x0265",
+      "index_int": 613,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WP_VERDICHTEREINTRITTSTEMPERATUR",
+      "index": "0x06d9",
+      "index_int": 1753,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "EL_AUFNAHMELEISTUNG_WW_TAG_WH",
+      "index": "0x091a",
+      "index_int": 2330,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "EL_AUFNAHMELEISTUNG_WW_TAG_KWH",
+      "index": "0x091b",
+      "index_int": 2331,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "EL_AUFNAHMELEISTUNG_WW_SUM_KWH",
+      "index": "0x091c",
+      "index_int": 2332,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "EL_AUFNAHMELEISTUNG_WW_SUM_MWH",
+      "index": "0x091d",
+      "index_int": 2333,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "EL_AUFNAHMELEISTUNG_HEIZ_TAG_WH",
+      "index": "0x091e",
+      "index_int": 2334,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "EL_AUFNAHMELEISTUNG_HEIZ_TAG_KWH",
+      "index": "0x091f",
+      "index_int": 2335,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "EL_AUFNAHMELEISTUNG_HEIZ_SUM_KWH",
+      "index": "0x0920",
+      "index_int": 2336,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "EL_AUFNAHMELEISTUNG_HEIZ_SUM_MWH",
+      "index": "0x0921",
+      "index_int": 2337,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WAERMEERTRAG_WW_TAG_WH",
+      "index": "0x092a",
+      "index_int": 2346,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WAERMEERTRAG_WW_TAG_KWH",
+      "index": "0x092b",
+      "index_int": 2347,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WAERMEERTRAG_WW_SUM_KWH",
+      "index": "0x092c",
+      "index_int": 2348,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WAERMEERTRAG_WW_SUM_MWH",
+      "index": "0x092d",
+      "index_int": 2349,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WAERMEERTRAG_HEIZ_TAG_WH",
+      "index": "0x092e",
+      "index_int": 2350,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WAERMEERTRAG_HEIZ_TAG_KWH",
+      "index": "0x092f",
+      "index_int": 2351,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WAERMEERTRAG_HEIZ_SUM_KWH",
+      "index": "0x0930",
+      "index_int": 2352,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WAERMEERTRAG_HEIZ_SUM_MWH",
+      "index": "0x0931",
+      "index_int": 2353,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "ANLAGENFROST",
+      "index": "0x0a00",
+      "index_int": 2560,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_60s",
+      "comment": "AH: 0x180"
+    },
+    {
+      "name": "WW_ECO_TEMPERATUR",
+      "index": "0x0a06",
+      "index_int": 2566,
+      "type": "et_dec_val",
+      "owner": "0x201",
+      "owner_name": "SPEICHER",
+      "poll": "pl_off",
+      "comment": "AH: 0x201"
+    },
+    {
+      "name": "HK_SOLLTEMPERATUR",
+      "index": "0x4eb0",
+      "index_int": 20144,
+      "type": "et_dec_val",
+      "owner": "0x601",
+      "owner_name": "MISCHERMODUL_2",
+      "poll": "pl_off",
+      "comment": "AH: 0x601 | Upstream v2.5: SOLLTEMPERATUR"
+    },
+    {
+      "name": "HK_ISTTEMPERATUR",
+      "index": "0x4eb4",
+      "index_int": 20148,
+      "type": "et_dec_val",
+      "owner": "0x601",
+      "owner_name": "MISCHERMODUL_2",
+      "poll": "pl_off",
+      "comment": "AH: 0x601 | Upstream v2.5: ISTTEMPERATUR"
+    },
+    {
+      "name": "HK_KOMFORT_TEMPERATUR",
+      "index": "0x4eb8",
+      "index_int": 20152,
+      "type": "et_dec_val",
+      "owner": "0x601",
+      "owner_name": "MISCHERMODUL_2",
+      "poll": "pl_off",
+      "comment": "AH: 0x601 | Upstream v2.5: KOMFORTTEMPERATUR"
+    },
+    {
+      "name": "HK_ECO_TEMPERATUR",
+      "index": "0x4eb9",
+      "index_int": 20153,
+      "type": "et_dec_val",
+      "owner": "0x601",
+      "owner_name": "MISCHERMODUL_2",
+      "poll": "pl_off",
+      "comment": "AH: 0x601 | Upstream v2.5: ECOTEMPERATUR"
+    },
+    {
+      "name": "STARTS_VERDICHTER_H",
+      "index": "0x4ef0",
+      "index_int": 20208,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "STARTS_VERDICHTER_L",
+      "index": "0x4ef1",
+      "index_int": 20209,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_10s",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "STEIGUNG_HEIZKURVE",
+      "index": "0x4f2b",
+      "index_int": 20267,
+      "type": "et_cent_val",
+      "owner": null,
+      "owner_name": null,
+      "poll": "pl_off"
+    },
+    {
+      "name": "MINIMAL_TEMPERATUR_HK_1",
+      "index": "0x4ea7",
+      "index_int": 20135,
+      "type": "et_dec_val",
+      "owner": "0x601",
+      "owner_name": "MISCHERMODUL_2",
+      "poll": "pl_off",
+      "comment": "AH: 0x601 @done 3686.4 => OFF",
+      "marked_done": true
+    },
+    {
+      "name": "MAXIMALE_RUECKLAUFTEMP",
+      "index": "0x4ea8",
+      "index_int": 20136,
+      "type": "et_dec_val",
+      "owner": null,
+      "owner_name": null,
+      "poll": "pl_off",
+      "comment": "Upstream v2.5: MAXTEMP"
+    },
+    {
+      "name": "SW_VERSION_WPM4_H",
+      "index": "0x0199",
+      "index_int": 409,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "AH: 0x480 & 0x514 @done  449 | 445",
+      "marked_done": true
+    },
+    {
+      "name": "SW_VERSION_WPM4_L",
+      "index": "0x019a",
+      "index_int": 410,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "AH: 0x480 & 0x514 @done  8   | 0",
+      "marked_done": true
+    },
+    {
+      "name": "SW_VERSION_FES_H",
+      "index": "0xfff0",
+      "index_int": 65520,
+      "type": "et_default",
+      "owner": "0x100",
+      "owner_name": "FES",
+      "poll": "pl_off",
+      "comment": "AH: 0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "SW_VERSION_FES_L",
+      "index": "0xfff1",
+      "index_int": 65521,
+      "type": "et_default",
+      "owner": "0x100",
+      "owner_name": "FES",
+      "poll": "pl_off",
+      "comment": "AH: 0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "SW_VERSION_FES_?",
+      "index": "0xfff2",
+      "index_int": 65522,
+      "type": "et_default",
+      "owner": "0x100",
+      "owner_name": "FES",
+      "poll": "pl_off",
+      "comment": "AH: 0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "STARTS_ABTAUUNG",
+      "index": "0x0806",
+      "index_int": 2054,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "WP_DRUCK_NIEDERDRUCK",
+      "index": "0x07a7",
+      "index_int": 1959,
+      "type": "et_cent_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "LAUFZEIT_VERDICHTER_HEIZEN",
+      "index": "0x4efb",
+      "index_int": 20219,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done | Upstream v2.5: LAUFZEIT_VD_HEIZEN",
+      "marked_done": true
+    },
+    {
+      "name": "LAUFZEIT_VERDICHTER_WW",
+      "index": "0x4efd",
+      "index_int": 20221,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done | Upstream v2.5: LAUFZEIT_VD_WW",
+      "marked_done": true
+    },
+    {
+      "name": "LAUFZEIT_VERDICHTER_ABTAUEN",
+      "index": "0x4f06",
+      "index_int": 20230,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done | Upstream v2.5: LAUFZEIT_VD_ABTAUEN",
+      "marked_done": true
+    },
+    {
+      "name": "LAUFZEIT_NHZ_1",
+      "index": "0x0259",
+      "index_int": 601,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "LAUFZEIT_NHZ_2",
+      "index": "0x025a",
+      "index_int": 602,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "LAUFZEIT_NHZ_12",
+      "index": "0x0805",
+      "index_int": 2053,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "ZEITDAUER_LETZTE_ABTAUUNG",
+      "index": "0x0807",
+      "index_int": 2055,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "STUNDE",
+      "index": "0x4f34",
+      "index_int": 20276,
+      "type": "et_default",
+      "owner": "0x100",
+      "owner_name": "FES",
+      "poll": "pl_off",
+      "comment": "AH: 0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "MINUTE",
+      "index": "0x4f33",
+      "index_int": 20275,
+      "type": "et_default",
+      "owner": "0x100",
+      "owner_name": "FES",
+      "poll": "pl_off",
+      "comment": "AH: 0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "TAG",
+      "index": "0x4f32",
+      "index_int": 20274,
+      "type": "et_default",
+      "owner": "0x100",
+      "owner_name": "FES",
+      "poll": "pl_off",
+      "comment": "AH: 0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "MONAT",
+      "index": "0x4f31",
+      "index_int": 20273,
+      "type": "et_default",
+      "owner": "0x100",
+      "owner_name": "FES",
+      "poll": "pl_off",
+      "comment": "AH: 0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "JAHR",
+      "index": "0x4f30",
+      "index_int": 20272,
+      "type": "et_default",
+      "owner": "0x100",
+      "owner_name": "FES",
+      "poll": "pl_off",
+      "comment": "AH: 0x100 @done +2000",
+      "marked_done": true
+    },
+    {
+      "name": "WP_TYPE_ID_??",
+      "index": "0x4f13",
+      "index_int": 20243,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514"
+    },
+    {
+      "name": "STROM MOTOR",
+      "index": "0x06b4",
+      "index_int": 1716,
+      "type": "et_dec_val",
+      "owner": "0x100",
+      "owner_name": "FES",
+      "poll": "pl_off",
+      "comment": "AH: 0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "UMGEBUNGSTEMPERATUR_INVERTER",
+      "index": "0xc1e6",
+      "index_int": 49638,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "TEMPERATUR_INV-VERDICHTER",
+      "index": "0xc1e7",
+      "index_int": 49639,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done | Upstream v2.5: TEMPERATUR_INV_VERDICHTER",
+      "marked_done": true
+    },
+    {
+      "name": "OEFFNUNGSGRAD_BYPASSVENTIEL",
+      "index": "0xc2c3",
+      "index_int": 49859,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done | Upstream v2.5: OEFFNUNGSGRAD_BYPASSVENT",
+      "marked_done": true
+    },
+    {
+      "name": "ADAPTION_UEBERHITZUNG",
+      "index": "0x4f9e",
+      "index_int": 20382,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "UNTERKUEHLUNG_EXVENTI_EIN",
+      "index": "0x4f9f",
+      "index_int": 20383,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "BETRIEBSART_KAELTEKREISREGLER",
+      "index": "0x4fa0",
+      "index_int": 20384,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514  Vermutung"
+    },
+    {
+      "name": "SOLL_UEBERHITZUNG_SAUGGAS_VENTIEL",
+      "index": "0x4fa1",
+      "index_int": 20385,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done | Upstream v2.5: SOLL_UEBERHITZUNG_SAUGGAS_VERDICHTER",
+      "marked_done": true
+    },
+    {
+      "name": "IST_UEBERHITZUNG_SAUGGAS_VENTIEL",
+      "index": "0x4fa2",
+      "index_int": 20386,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done | Upstream v2.5: IST_UEBERHITZUNG_SAUGGAS_VERDICHTER",
+      "marked_done": true
+    },
+    {
+      "name": "VERDICHTERDREHZAHLGRENZE",
+      "index": "0x4fac",
+      "index_int": 20396,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "OEFFNUNGSGRAD_EXV",
+      "index": "0x07ca",
+      "index_int": 1994,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "SOLLWERT_UEBERHITZUNG",
+      "index": "0x07f3",
+      "index_int": 2035,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "REGELABWEICHUNG",
+      "index": "0x033d",
+      "index_int": 829,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "ISTWERT_UEBERHITZUNG_VERDAMPFER",
+      "index": "0x07f4",
+      "index_int": 2036,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "ISTWERT_UEBERHITZUNG_REKUPERATOR_KUEHLEN",
+      "index": "0x07f5",
+      "index_int": 2037,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "VORSTEUER_OEFFNUNGSGRAD_EXV",
+      "index": "0x07f6",
+      "index_int": 2038,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "P-FAKTOR",
+      "index": "0x07f7",
+      "index_int": 2039,
+      "type": "et_cent_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "I-FAKTOR",
+      "index": "0x07f8",
+      "index_int": 2040,
+      "type": "et_cent_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "D-FAKTOR",
+      "index": "0x07f9",
+      "index_int": 2041,
+      "type": "et_cent_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "UNTERK_COND",
+      "index": "0x0aff",
+      "index_int": 2815,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514 @done",
+      "marked_done": true
+    },
+    {
+      "name": "ZEITINTERVALL",
+      "index": "0x4f4d",
+      "index_int": 20301,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "AH: 0x480->0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "RESTSTILLSTANDZEIT",
+      "index": "0x4f4e",
+      "index_int": 20302,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "AH: 0x514->0x100 @done | Upstream v2.5: RESTSTILLSTANDSZEIT",
+      "marked_done": true
+    },
+    {
+      "name": "SPREIZUNG",
+      "index": "0x4f91",
+      "index_int": 20369,
+      "type": "et_dec_val",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "AH: 0x480->0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "MINIMALE PUMPLEISTUNG",
+      "index": "0x4f98",
+      "index_int": 20376,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "AH: 0x480->0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "MAXIMALE PUMPLEISTUNG",
+      "index": "0x4f99",
+      "index_int": 20377,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "AH: 0x480->0x100 @done",
+      "marked_done": true
+    },
+    {
+      "name": "REGELDYNAMIK",
+      "index": "0x4e8a",
+      "index_int": 20106,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "AH: 0x180->0x100 @done | Upstream v2.5: REGLERDYNAMIK_HEIZEN",
+      "marked_done": true
+    },
+    {
+      "name": "BETRIEBS_STATUS",
+      "index": "0x0176",
+      "index_int": 374,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Bitfeld, Wert big-endian (data[5]<<8 | data[6]); Bits siehe 'bits' | GUI-Auswertung 2026-10-29",
+      "bits": [
+        {
+          "bit": 0,
+          "name": "VERDICHTER",
+          "confirmed": true,
+          "comment": "auch Schaltprogramm-Symbol im alten Code (x[6] & 0x01)"
+        },
+        {
+          "bit": 6,
+          "name": "SPEICHERLADEPUMPE",
+          "confirmed": true
+        },
+        {
+          "bit": 12,
+          "name": "ZUSATZHEIZUNG",
+          "confirmed": true,
+          "comment": "Notlauf: Verdichter aus, nur Zusatzheizung, Wert 0x1040"
+        },
+        {
+          "bit": 14,
+          "name": "WARMWASSER",
+          "confirmed": true
+        }
+      ]
+    },
+    {
+      "name": "BETRIEBS_STATUS_WPLA",
+      "index": "0x4eef",
+      "index_int": 20207,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Bitfeld WPL-A, Wert big-endian; Quelle kr0ner/OneESP32ToRuleThemAll yaml/wpl_a_base.yaml | GUI-Auswertung 2026-10-29",
+      "bits": [
+        {
+          "bit": 0,
+          "name": "HEIZKREISPUMPE_1",
+          "confirmed": true
+        },
+        {
+          "bit": 1,
+          "name": "HEIZKREISPUMPE_2",
+          "confirmed": false,
+          "comment": "Quelle kr0ner, am Display noch nicht geprueft"
+        },
+        {
+          "bit": 2,
+          "name": "AUFHEIZPROGRAMM",
+          "confirmed": false,
+          "comment": "Quelle kr0ner, am Display noch nicht geprueft"
+        },
+        {
+          "bit": 3,
+          "name": "NHZ_STUFEN_IN_BETRIEB",
+          "confirmed": false,
+          "comment": "Quelle kr0ner, am Display noch nicht geprueft"
+        },
+        {
+          "bit": 4,
+          "name": "WP_IM_HEIZBETRIEB",
+          "confirmed": true
+        },
+        {
+          "bit": 5,
+          "name": "WP_IM_WW_BETRIEB",
+          "confirmed": false,
+          "comment": "Quelle kr0ner, am Display noch nicht geprueft"
+        },
+        {
+          "bit": 6,
+          "name": "VERDICHTER_IN_BETRIEB",
+          "confirmed": true
+        },
+        {
+          "bit": 7,
+          "name": "SOMMERBETRIEB_AKTIV",
+          "confirmed": false,
+          "comment": "Quelle kr0ner, am Display noch nicht geprueft"
+        },
+        {
+          "bit": 8,
+          "name": "KUEHLBETRIEB_AKTIV",
+          "confirmed": false,
+          "comment": "Quelle kr0ner, am Display noch nicht geprueft"
+        },
+        {
+          "bit": 9,
+          "name": "ABTAUBETRIEB",
+          "confirmed": false,
+          "comment": "Quelle kr0ner, am Display noch nicht geprueft"
+        },
+        {
+          "bit": 10,
+          "name": "SILENT_MODE_1",
+          "confirmed": false,
+          "comment": "Quelle kr0ner, am Display noch nicht geprueft"
+        },
+        {
+          "bit": 11,
+          "name": "SILENT_MODE_2",
+          "confirmed": false,
+          "comment": "Quelle kr0ner, am Display noch nicht geprueft"
+        }
+      ]
+    },
+    {
+      "name": "WW_HYSTERESE",
+      "index": "0x0022",
+      "index_int": 34,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 5.0, 1.0..15.0"
+    },
+    {
+      "name": "SENSORABGLEICH_VORLAUF_WP",
+      "index": "0x0658",
+      "index_int": 1624,
+      "type": "et_dec_val",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0.0, -5.0..5.0"
+    },
+    {
+      "name": "SENSORABGLEICH_VORLAUF_NHZ",
+      "index": "0x0659",
+      "index_int": 1625,
+      "type": "et_dec_val",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0.0, -5.0..5.0"
+    },
+    {
+      "name": "SENSORABGLEICH_RUECKLAUF_WP",
+      "index": "0x065a",
+      "index_int": 1626,
+      "type": "et_dec_val",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0.0, -5.0..5.0"
+    },
+    {
+      "name": "AUSLEGUNGSTEMPERATUR",
+      "index": "0x0665",
+      "index_int": 1637,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert -12.0, -20.0..5.0"
+    },
+    {
+      "name": "WAERMEBEDARF",
+      "index": "0x0666",
+      "index_int": 1638,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 8.0, 2.0..10.0"
+    },
+    {
+      "name": "WW_LEISTUNG_SOMMER",
+      "index": "0x066f",
+      "index_int": 1647,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 5, 2..8"
+    },
+    {
+      "name": "WW_LEISTUNG_WINTER",
+      "index": "0x0670",
+      "index_int": 1648,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 8, 2..8"
+    },
+    {
+      "name": "SOLLSPREIZUNG",
+      "index": "0x067e",
+      "index_int": 1662,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 8.0, 6.0..10.0"
+    },
+    {
+      "name": "SPANNUNG_INVERTER",
+      "index": "0x06b1",
+      "index_int": 1713,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 234.2 V"
+    },
+    {
+      "name": "STROM_INVERTER",
+      "index": "0x06b2",
+      "index_int": 1714,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 5.7 A"
+    },
+    {
+      "name": "KOMBISPEICHER",
+      "index": "0x070d",
+      "index_int": 1805,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0, 0..1"
+    },
+    {
+      "name": "HEIZEN_TEMPERATURVORGABE_1V",
+      "index": "0x0715",
+      "index_int": 1813,
+      "type": "et_dec_val",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 10.0, 10.0..30.0"
+    },
+    {
+      "name": "HEIZEN_TEMPERATURVORGABE_10V",
+      "index": "0x0716",
+      "index_int": 1814,
+      "type": "et_dec_val",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 50.0, 31.0..65.0"
+    },
+    {
+      "name": "KUEHLEN_TEMPERATURVORGABE_1V",
+      "index": "0x0717",
+      "index_int": 1815,
+      "type": "et_dec_val",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 11.0, 9.0..12.0"
+    },
+    {
+      "name": "KUEHLEN_TEMPERATURVORGABE_10V",
+      "index": "0x0718",
+      "index_int": 1816,
+      "type": "et_dec_val",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 15.0, 13.0..20.0"
+    },
+    {
+      "name": "LEISTUNG_PWM_X1_17",
+      "index": "0x071f",
+      "index_int": 1823,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 50, 0..100"
+    },
+    {
+      "name": "FEHLERAUSGANG",
+      "index": "0x0730",
+      "index_int": 1840,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0, 0..1"
+    },
+    {
+      "name": "ANZEIGE_HOCHDRUCK",
+      "index": "0x07a6",
+      "index_int": 1958,
+      "type": "et_cent_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 12.64 bar"
+    },
+    {
+      "name": "SILENT_LEISTUNG",
+      "index": "0x4e9f",
+      "index_int": 20127,
+      "type": "et_default",
+      "owner": "0x500",
+      "owner_name": "HEIZMODUL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 70, 35..100 (0x480: 0 = aus)"
+    },
+    {
+      "name": "SILENT_LUEFTER",
+      "index": "0x4ea0",
+      "index_int": 20128,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0, 50..100"
+    },
+    {
+      "name": "WAERMEPUMPE_AUS",
+      "index": "0x4ea1",
+      "index_int": 20129,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0, 0..1"
+    },
+    {
+      "name": "PUFFERTRIEB",
+      "index": "0x4eaf",
+      "index_int": 20143,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 1, 0..1"
+    },
+    {
+      "name": "WW_ANFORDERUNG",
+      "index": "0x4eb2",
+      "index_int": 20146,
+      "type": "et_default",
+      "owner": "0x200",
+      "owner_name": "",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0, 0..2"
+    },
+    {
+      "name": "KONSTANTE_LEISTUNG",
+      "index": "0x4eba",
+      "index_int": 20154,
+      "type": "et_dec_val",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 4.0, 2.0..10.0"
+    },
+    {
+      "name": "REDUZIERUNG_LEISTUNG",
+      "index": "0x4ebf",
+      "index_int": 20159,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0, 0..1"
+    },
+    {
+      "name": "EINGESCHALTETE_STUFEN",
+      "index": "0x4efa",
+      "index_int": 20218,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 1"
+    },
+    {
+      "name": "WARMWASSERBETRIEB",
+      "index": "0x4f24",
+      "index_int": 20260,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 1, 0..1"
+    },
+    {
+      "name": "WARMWASSERHYSTERESE",
+      "index": "0x4f25",
+      "index_int": 20261,
+      "type": "et_dec_val",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 5.0, 1.0..15.0"
+    },
+    {
+      "name": "ANTILEGIONELLENBEHANDLUNG",
+      "index": "0x4f28",
+      "index_int": 20264,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 1, 0..1"
+    },
+    {
+      "name": "STILLSTANDSZEIT",
+      "index": "0x4f2e",
+      "index_int": 20270,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 10, 1..120"
+    },
+    {
+      "name": "MINIMALE_ABTAUZEIT",
+      "index": "0x4f2f",
+      "index_int": 20271,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 1, 1..20"
+    },
+    {
+      "name": "AUSSENTEMPERATUR_WP",
+      "index": "0x4f4f",
+      "index_int": 20303,
+      "type": "et_dec_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 8.2 degC"
+    },
+    {
+      "name": "EVU_SPERRE_CONFIG",
+      "index": "0x4f84",
+      "index_int": 20356,
+      "type": "et_default",
+      "owner": "0x480",
+      "owner_name": "MANAGER",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 3, 0..3"
+    },
+    {
+      "name": "PUMPENLEISTUNG_STANDBY_4F8A",
+      "index": "0x4f8a",
+      "index_int": 20362,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 30 %, 20..100"
+    },
+    {
+      "name": "PUMPENLEISTUNG_HEIZEN",
+      "index": "0x4f8c",
+      "index_int": 20364,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 50 %, 30..80"
+    },
+    {
+      "name": "PUMPENLEISTUNG_KUEHLEN",
+      "index": "0x4f92",
+      "index_int": 20370,
+      "type": "et_default",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 80 %, 80..100"
+    },
+    {
+      "name": "STEIGUNG_KUEHLKURVE",
+      "index": "0x4fb9",
+      "index_int": 20409,
+      "type": "et_dec_val",
+      "owner": "0x601",
+      "owner_name": "MISCHERMODUL_2",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 10.0, 1.0..30.0"
+    },
+    {
+      "name": "STARTTEMPERATUR",
+      "index": "0x4fbe",
+      "index_int": 20414,
+      "type": "et_dec_val",
+      "owner": "0x601",
+      "owner_name": "MISCHERMODUL_2",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 15.0, 11.0..30.0"
+    },
+    {
+      "name": "EVU_SPERRE",
+      "index": "0xabe1",
+      "index_int": 44001,
+      "type": "et_default",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 0/1"
+    },
+    {
+      "name": "VERDICHTER_STILLSTAND",
+      "index": "0xfdb1",
+      "index_int": 64945,
+      "type": "et_little_endian",
+      "owner": "0x180",
+      "owner_name": "KESSEL",
+      "poll": "pl_off",
+      "comment": "Name v2.5-Branch (Upstream), Bus-Wert 10 (0x0a00)"
+    }
+  ],
+  "disabled_signals": [
+    {
+      "name": "SEKUNDE",
+      "index": "0x04f3",
+      "type": "et_little_endian",
+      "owner": null,
+      "reason": "In der Quelle auskommentiert; Index dort nur als 0x4F3 angegeben"
+    },
+    {
+      "name": "WP_DRUCK_HOCHDRUCK",
+      "index": null,
+      "type": "et_cent_val",
+      "owner": "0x514",
+      "owner_name": "WPUMPE",
+      "reason": "In der Quelle auskommentiert; Index ist Platzhalter 0xXXXX (unbekannt)"
+    }
+  ],
+  "error_list": [
+    {
+      "index": "0x0002",
+      "name": "Schuetz klebt"
+    },
+    {
+      "index": "0x0003",
+      "name": "ERR HD-SENSOR"
+    },
+    {
+      "index": "0x0004",
+      "name": "Hochdruck"
+    },
+    {
+      "index": "0x0005",
+      "name": "Verdampferfuehler"
+    },
+    {
+      "index": "0x0006",
+      "name": "Relaistreiber"
+    },
+    {
+      "index": "0x0007",
+      "name": "Relaispegel"
+    },
+    {
+      "index": "0x0008",
+      "name": "Hexschalter"
+    },
+    {
+      "index": "0x0009",
+      "name": "Drehzahl Luefter"
+    },
+    {
+      "index": "0x000a",
+      "name": "Lueftertreiber"
+    },
+    {
+      "index": "0x000b",
+      "name": "Reset Baustein"
+    },
+    {
+      "index": "0x000c",
+      "name": "ND"
+    },
+    {
+      "index": "0x000d",
+      "name": "ROM"
+    },
+    {
+      "index": "0x000e",
+      "name": "QUELLEN MINTEMP"
+    },
+    {
+      "index": "0x0010",
+      "name": "Abtauen"
+    },
+    {
+      "index": "0x0012",
+      "name": "ERR T-HEI IWS"
+    },
+    {
+      "index": "0x0017",
+      "name": "ERR T-FRO IWS"
+    },
+    {
+      "index": "0x001a",
+      "name": "Niederdruck"
+    },
+    {
+      "index": "0x001b",
+      "name": "ERR ND-DRUCK"
+    },
+    {
+      "index": "0x001c",
+      "name": "ERR HD-DRUCK"
+    },
+    {
+      "index": "0x001d",
+      "name": "HD-SENSOR-MAX"
+    },
+    {
+      "index": "0x001e",
+      "name": "HEISSGAS-MAX"
+    },
+    {
+      "index": "0x001f",
+      "name": "ERR HD-SENSOR"
+    },
+    {
+      "index": "0x0020",
+      "name": "Einfrierschutz"
+    },
+    {
+      "index": "0x0021",
+      "name": "KEINE LEISTUNG"
+    }
+  ],
+  "betriebsart_list": [
+    {
+      "index": "0x0000",
+      "name": "Notbetrieb"
+    },
+    {
+      "index": "0x0100",
+      "name": "Bereitschaftsbetrieb"
+    },
+    {
+      "index": "0x0200",
+      "name": "Programmbetrieb"
+    },
+    {
+      "index": "0x0300",
+      "name": "Komfortbetrieb"
+    },
+    {
+      "index": "0x0400",
+      "name": "ECO-Betrieb"
+    },
+    {
+      "index": "0x0500",
+      "name": "Warmwasserbetrieb"
+    },
+    {
+      "index": "0x0600",
+      "name": "Notbetrieb"
+    }
+  ]
+}

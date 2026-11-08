@@ -1,0 +1,20 @@
+#
+#  ESP32-S3 Board Configuration — esp-idf framework variant
+#  Generic ESP32-S3-DevKitC-1 style board (e.g. "esp32-s3-technik-mk1" test rig)
+#  Flash: 16MB. No PSRAM assumed — add a `psram:` block if your board has it.
+#
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      # I2C-Slave-Treiber V2: on_receive mit Laenge (V1 liefert keine). Siehe i2c_slave_rx.h
+      CONFIG_I2C_ENABLE_SLAVE_DRIVER_VERSION_2: "y"
+      # I2C-ISR im IRAM: laeuft auch waehrend Flash-Zugriffen (NVS, OTA, Log) weiter
+      CONFIG_I2C_ISR_IRAM_SAFE: "y"
+      # IDF 5.5.6: i2c_slave_read_rx (IRAM, im ISR) ruft vRingbufferGetInfo auf. Liegt das im Flash,
+      # haengt der ISR waehrend Flash-Schreiben (safe_mode, NVS, OTA) -> Interrupt-Watchdog (30.10.2026).
+      CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH: "n"
+  variant: esp32s3
+  flash_size: 16MB

@@ -1,0 +1,138 @@
+#
+#  mk1-debug: CAN-Debug-Firmware fuer ESP32-S3 (esp-idf, Ethernet W5500)
+#  Sniffer, Single-Read und Register-Scan ueber MQTT (Praefix stiebel-debug/).
+#  Schreiben nur ueber cmd/write (mit Ruecklesen). Zugangsdaten nur ueber secrets.yaml (!secret).
+#
+
+substitutions:
+  ntp_server: "pool.ntp.org"   # eigenen NTP-Server (z.B. Router) hier eintragen
+  device_name: "mk1-debug"
+  friendly_name: "mk1-debug"
+  # CAN (ESP32-S3 TWAI)
+  can_tx_pin: GPIO18
+  can_rx_pin: GPIO16
+  can_id_pc: "0x680"
+  # Traegerplatine: SDA GPIO15 (alter freier Aufbau: GPIO21), nur Eingang + Pull-up
+  i2c_sda_gpio: "15"
+  i2c_scl_gpio: "17"
+  can_bitrate: 50kbps
+  # W5500 Ethernet SPI (esp32-s3-technik-mk1 rig)
+  eth_clk_pin: GPIO13
+  eth_mosi_pin: GPIO11
+  eth_miso_pin: GPIO12
+  eth_cs_pin: GPIO14
+  eth_int_pin: GPIO10
+  eth_rst_pin: GPIO9
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 1000
+      then:
+        - lambda: |-
+            i2c_pins_idle(${i2c_sda_gpio}, ${i2c_scl_gpio});
+  includes:
+    - firmware/i2c_idle.h
+    - firmware/ring_buffer.h
+    - firmware/elster_frame.h
+    - firmware/debug_json.h
+    - firmware/unix_time.h
+    - firmware/can_debug.h
+
+packages:
+  board: !include firmware/board_esp32s3_espidf.yaml
+  network: !include firmware/network_ethernet_w5500.yaml
+  can: !include firmware/can_debug.yaml
+
+logger:
+  level: INFO
+  baud_rate: 115200
+
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - ${ntp_server}
+    on_time_sync:
+      - lambda: |-
+          auto t = id(sntp_time).utcnow();
+          ESP_LOGI("ntp", "Zeit synchronisiert (UTC): %04d-%02d-%02d %02d:%02d:%02d", t.year, t.month, t.day_of_month, t.hour, t.minute, t.second);
+
+#########################################
+#                                       #
+#   API & OTA                           #
+#                                       #
+#########################################
+api:
+  reboot_timeout: 0s  # sonst Neustart alle 15 min ohne API-Client (stoert lange Scans)
+  encryption:
+    key: !secret mk1_api_key
+
+ota:
+  platform: esphome
+  password: !secret mk1_ota_password
+
+#########################################
+#                                       #
+#   MQTT                                #
+#                                       #
+#########################################
+mqtt:
+  broker: !secret mqtt_server
+  port: !secret mqtt_port
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  id: mqtt_client
+  discovery: false
+  topic_prefix: stiebel-debug
+  birth_message:
+    topic: stiebel-debug/availability
+    payload: online
+    qos: 1
+    retain: true
+  will_message:
+    topic: stiebel-debug/availability
+    payload: offline
+    qos: 1
+    retain: true
+  # Default-Topics von ESPHome abschalten (kollidieren mit stiebel-debug/status)
+  log_topic:
+  shutdown_message:
+  keepalive: 15s
+  reboot_timeout: 0s
+  on_disconnect:
+    - logger.log:
+        level: WARN
+        format: "MQTT getrennt - automatischer Reconnect"
+
+  on_message:
+    - topic: stiebel-debug/cmd/sniff
+      then:
+        - lambda: |-
+            dbg_on_command("sniff", x);
+
+    - topic: stiebel-debug/cmd/read
+      then:
+        - lambda: |-
+            dbg_on_command("read", x);
+
+    - topic: stiebel-debug/cmd/write
+      then:
+        - lambda: |-
+            dbg_on_command("write", x);
+
+    - topic: stiebel-debug/cmd/scan
+      then:
+        - lambda: |-
+            dbg_on_command("scan", x);
+
+    - topic: stiebel-debug/cmd/probe
+      then:
+        - lambda: |-
+            dbg_on_command("probe", x);
+
+    - topic: stiebel-debug/cmd/stop
+      then:
+        - lambda: |-
+            dbg_on_command("stop", x);

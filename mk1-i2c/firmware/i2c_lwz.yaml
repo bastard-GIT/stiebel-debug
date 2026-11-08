@@ -1,0 +1,34 @@
+#
+#  Projekt mk1-i2c, Hardware-I2C-Slave fuer die LWZ 180 als ESPHome-Paket.
+#  Wird von ../mk1-i2c.yaml eingebunden. Kein ESPHome-i2c-Block, kein light, kein canbus.
+#  Pins und Substitutionen stehen in mk1-i2c.yaml.
+#
+
+esphome:
+  # Reihenfolge wichtig: ring_buffer.h vor debug_json.h (debug_json.h includet es).
+  includes:
+    - firmware/ring_buffer.h
+    - firmware/debug_json.h
+    - firmware/unix_time.h
+    - firmware/crash_trace.h
+    - firmware/i2c_frame.h
+    - firmware/i2c_slave_rx.h
+    - firmware/i2c_scan.h
+    - firmware/i2c_key.h
+    - firmware/lwz_ha.h
+    - firmware/lwz_ctl.h
+    - firmware/i2c_lwz.h
+  on_boot:
+    - priority: -100   # nach MQTT-Setup
+      then:
+        - lambda: |-
+            i2cs_setup(${i2c_sda_gpio}, ${i2c_scl_gpio}, ${can_txd_gpio}, ${i2c_internal_pullup}, ${i2c_slave_addr});
+
+interval:
+  - interval: 20ms
+    then:
+      - lambda: 'i2cs_loop();'
+
+  - interval: 5s
+    then:
+      - lambda: 'i2cs_status();'

@@ -1,0 +1,222 @@
+{
+  "source": "https://github.com/kdarnok/lwz180 (README.md, lwz180.ino; GPL-2.0), Rohtext per curl von raw.githubusercontent.com am 2026-10-25 vom Ueberwacher geprueft",
+  "retrieved": "2026-10-25",
+  "unverified": true,
+  "crc": {
+    "poly": "0x49",
+    "init": "0x00",
+    "refin": false,
+    "refout": false,
+    "xorout": "0x00",
+    "covers": "header+payload (alle Bytes vor dem CRC-Byte, ohne Adressbyte; ein fuehrendes 0x00 aendert die CRC bei init 0 nicht)",
+    "verified": true,
+    "note": "Sketch: crc8_push_byte(0, code) fuer Tastenpakete. Header e3 30 20 hat CRC 0x00 und Nullbytes aendern CRC bei init 0 nicht, daher gilt crc8(header+payload) == crc8(code). Rechnerisch geprueft. Fuer Istwert/Display Annahme gleiche Abdeckung, am Geraet nicht verifiziert. Messung 2026-10-25: 167/167 Istwert- und 12/12 Displaypakete mit crc8(Byte 1..-2) korrekt, verified=true."
+  },
+  "packets": {
+    "istwert": {
+      "header": "e3 20 10",
+      "length": 7,
+      "layout": "Index 0-2 Header e3 20 10, Index 3 Typ, Index 4-5 Wert int16 BE, Index 6 CRC ueber Index 0-5. Indizes ohne Adressbyte 00."
+    },
+    "tasten": {
+      "header": "e3 30 20",
+      "length": 7,
+      "layout": "Index 0-2 Header e3 30 20, Index 3-4 = 00, Index 5 Tastencode, Index 6 CRC ueber Index 0-5 (= crc8([code]))"
+    },
+    "display": {
+      "header": "f7 20",
+      "length": 28,
+      "layout": "28 Byte ohne Adressbyte; README-Tabelle und Sketch (data[8] Ziffer, data[15], data[19], data[20], data[26]) nutzen 0-basierte Indizes im Paket ohne Adressbyte; README und Sketch widersprechen sich bei Power-Vent-LED (23 vs 26) und Zeitschaltung (Bit 2 vs Bit 0)"
+    }
+  },
+  "types": {
+    "0x00": {
+      "name": "I13 Taupunkt Abluft",
+      "unit": "°C",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x01": {
+      "name": "I14 Taupunkt Aussenluft",
+      "unit": "°C",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x06": {
+      "name": "I9 Temperatur Aussenluft",
+      "unit": "°C",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": true
+    },
+    "0x07": {
+      "name": "I10 Temperatur Zuluft",
+      "unit": "°C",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x08": {
+      "name": "I2 Temperatur Abluft",
+      "unit": "°C",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x09": {
+      "name": "I11 Temperatur Fortluft",
+      "unit": "°C",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x0e": {
+      "name": "I12 rel. Feuchte Aussenluft",
+      "unit": "%",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x0f": {
+      "name": "I3 rel. Feuchte Abluft",
+      "unit": "%",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": true
+    },
+    "0x10": {
+      "name": "I16 Zuluftvolumenstrom berechnet",
+      "unit": "m3/h",
+      "scale": 1,
+      "signed": true,
+      "confirmed": true
+    },
+    "0x11": {
+      "name": "I18 Abluftvolumenstrom berechnet",
+      "unit": "m3/h",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x14": {
+      "name": "I15 Antrieb Zuluftventilator",
+      "unit": "%",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": true
+    },
+    "0x15": {
+      "name": "I17 Antrieb Abluftventilator",
+      "unit": "%",
+      "scale": 0.1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x16": {
+      "name": "I19 Leistung interner Vorheizer",
+      "unit": "%",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x1e": {
+      "name": "P6",
+      "unit": "m3/h",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x1f": {
+      "name": "P7",
+      "unit": "m3/h",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x20": {
+      "name": "P8",
+      "unit": "m3/h",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x21": {
+      "name": "P9",
+      "unit": "m3/h",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x4d": {
+      "name": "P10",
+      "unit": "Pa",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x50": {
+      "name": "I21 Betriebszeit Luefter",
+      "unit": "d",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x51": {
+      "name": "I20 Betriebszeit Lueftungsgeraet",
+      "unit": "d",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x53": {
+      "name": "P11",
+      "unit": "Pa",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x54": {
+      "name": "P12",
+      "unit": "Pa",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x55": {
+      "name": "P13",
+      "unit": "Pa",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    },
+    "0x5a": {
+      "name": "I4 Filterstandzeit",
+      "unit": "h",
+      "scale": 1,
+      "signed": true,
+      "confirmed": false
+    }
+  },
+  "keys": {
+    "1": "down (wheel)",
+    "2": "up (wheel)",
+    "5": "menu",
+    "6": "ok",
+    "7": "home",
+    "8": "power vent (kurz, laut README; Sketch nutzt 0x0c)",
+    "9": "menu (long)",
+    "10": "ok (long)",
+    "11": "home (long)",
+    "12": "power vent (long)",
+    "13": "cleaning lock: home + ok (long)"
+  },
+  "examples": [
+    {
+      "hex": "e3302000000524",
+      "crc_ok": true,
+      "note": "abgeleitet aus Sketch (Taste 5 = menu), nicht mitgeschnitten"
+    }
+  ]
+}

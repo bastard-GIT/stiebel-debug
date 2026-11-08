@@ -1,0 +1,13 @@
+#
+#  Network: Ethernet (W5500 SPI) — e.g. "esp32-s3-technik-mk1" reference rig
+#  DHCP by default. Add a manual_ip block below if you need a static address.
+#
+
+ethernet:
+  type: W5500
+  clk_pin: ${eth_clk_pin}
+  mosi_pin: ${eth_mosi_pin}
+  miso_pin: ${eth_miso_pin}
+  cs_pin: ${eth_cs_pin}
+  interrupt_pin: ${eth_int_pin}
+  reset_pin: ${eth_rst_pin}

@@ -1,0 +1,115 @@
+#
+#  Projekt mk1-i2c, I2C-Slave fuer die LWZ 180 (ESP32-S3, esp-idf, Ethernet W5500)
+#  Hardware-I2C-Slave (seit 2026-10-29): Adresse 42, General Call, ACK, kein Clock-Stretching.
+#  Der fruehere passive Software-Sniffer entfaellt seit 2026-10-30.
+#  Ausgabe per MQTT unter stiebel-i2c/. Zugangsdaten nur ueber secrets.yaml (!secret).
+#  Kein CAN-Betrieb: Produktiv- und Debug-Firmware sind waehrenddessen nicht aktiv.
+#
+
+substitutions:
+  ntp_server: "pool.ntp.org"   # eigenen NTP-Server (z.B. Router) hier eintragen
+  device_name: "mk1-i2c"
+  friendly_name: "mk1-i2c"
+  # I2C (ISO1540 Seite 1)
+  i2c_slave_addr: "42"
+  i2c_sda_gpio: "15"   # Traegerplatine (alter freier Aufbau: 21)
+  i2c_scl_gpio: "17"
+  # CAN-Pins (ISO1042): TXD fest High = rezessiv, RXD nur Eingang (can_idle.h, nur Test-Build)
+  can_txd_gpio: "18"
+  can_rxd_gpio: "16"
+  i2c_internal_pullup: "true"
+  # W5500 Ethernet SPI (wie mk1-debug)
+  eth_clk_pin: GPIO13
+  eth_mosi_pin: GPIO11
+  eth_miso_pin: GPIO12
+  eth_cs_pin: GPIO14
+  eth_int_pin: GPIO10
+  eth_rst_pin: GPIO9
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  includes:
+    - firmware/can_idle.h
+  # CAN-Transceiver ruhig halten, so frueh wie moeglich (vor allen anderen Komponenten)
+  on_boot:
+    - priority: 1000
+      then:
+        - lambda: 'can_idle_setup(${can_txd_gpio}, ${can_rxd_gpio});'
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: 'can_idle_check();'
+
+packages:
+  board: !include firmware/board_esp32s3_espidf.yaml
+  network: !include firmware/network_ethernet_w5500.yaml
+  lwz: !include firmware/i2c_lwz.yaml
+
+logger:
+  level: INFO
+  baud_rate: 115200
+
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - ${ntp_server}
+    on_time_sync:
+      - lambda: |-
+          auto t = id(sntp_time).utcnow();
+          ESP_LOGI("ntp", "Zeit synchronisiert (UTC): %04d-%02d-%02d %02d:%02d:%02d", t.year, t.month, t.day_of_month, t.hour, t.minute, t.second);
+
+#########################################
+#                                       #
+#   API & OTA                           #
+#                                       #
+#########################################
+api:
+  reboot_timeout: 0s
+  encryption:
+    key: !secret mk1_api_key
+
+ota:
+  platform: esphome
+  password: !secret mk1_ota_password
+  # I2C-Slave waehrend OTA abbauen (kein I2C-Interrupt beim Flash-Schreiben, Bus beim Neustart frei)
+  on_begin:
+    - lambda: 'i2cs_ota_begin();'
+  on_error:
+    - lambda: 'i2cs_ota_error();'
+
+#########################################
+#                                       #
+#   MQTT                                #
+#                                       #
+#########################################
+mqtt:
+  broker: !secret mqtt_server
+  port: !secret mqtt_port
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  id: mqtt_client
+  discovery: false
+  topic_prefix: stiebel-i2c
+  birth_message:
+    topic: stiebel-i2c/availability
+    payload: online
+    qos: 1
+    retain: true
+  will_message:
+    topic: stiebel-i2c/availability
+    payload: offline
+    qos: 1
+    retain: true
+  # Default-Topics von ESPHome abschalten (kollidieren mit stiebel-i2c/status)
+  log_topic:
+  shutdown_message:
+  keepalive: 15s
+  reboot_timeout: 0s
+  on_disconnect:
+    - logger.log:
+        level: WARN
+        format: "MQTT getrennt - automatischer Reconnect"
+  # Kommandos (cmd/sniff) abonniert der Glue in i2c_lwz.h, kein on_message hier.

@@ -1,0 +1,8 @@
+secrets.yaml
+logs/
+.esphome/
+__pycache__/
+*.pyc
+*.bak*
+Salae-logic-data/
+.pytest_cache/

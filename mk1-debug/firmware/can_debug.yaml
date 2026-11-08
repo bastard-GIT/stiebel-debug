@@ -1,0 +1,32 @@
+#
+#  mk1-debug: CAN-Bus (TWAI) fuer Sniffer und Elster-Requests
+#  Wird von ../mk1-debug.yaml als Package eingebunden.
+#
+
+canbus:
+  - platform: esp32_can
+    id: my_can
+    tx_pin: ${can_tx_pin}
+    rx_pin: ${can_rx_pin}
+    can_id: ${can_id_pc}
+    use_extended_id: false
+    bit_rate: ${can_bitrate}
+    rx_queue_len: 512
+    tx_queue_len: 64
+    on_frame:
+      - can_id: 0
+        can_id_mask: 0
+        then:
+          - lambda: |-
+              dbg_on_frame(can_id, x);
+
+interval:
+  - interval: 20ms
+    then:
+      - lambda: |-
+          dbg_loop();
+
+  - interval: 5s
+    then:
+      - lambda: |-
+          dbg_publish_status();
