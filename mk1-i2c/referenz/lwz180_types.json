@@ -210,12 +210,12 @@
       "note": "PR #2 kdarnok/lwz180; auf unserem Bus nicht gesehen"
     },
     "0x35": {
-      "name": "Fühlerwiderstand Abluft",
+      "name": "Fühlerwiderstand Fortluft",
       "unit": "Ω",
       "scale": 0.1,
       "signed": false,
       "confirmed": true,
-      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski); Log: 1032-1054 Ω, passt zu Typ 09 (Fortluft) auf ca. 0,2 K, PT1000; Zuordnung Abluft/Fortluft offen"
+      "note": "PR #2 kdarnok/lwz180 (KKSzymanowski) nennt 35 = Abluft; nach unseren Logs Fortluft: Log 1032-1054 Ω, passt zu Typ 09 (Fortluft) auf ca. 0,2 K, PT1000"
     },
     "0x36": {
       "name": "Fühlerwiderstand Zuluft",
