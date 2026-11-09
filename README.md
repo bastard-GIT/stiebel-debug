@@ -83,6 +83,12 @@ Zugangsdaten stehen nicht im Repo. `secrets.yaml` (`mqtt_server`, `mqtt_port`, `
 | `STIEBEL_MQTT_HOST`, `STIEBEL_MQTT_USER` | Vorbelegung des Verbindungsdialogs |
 | `MK1_IP`, `STIEBEL_ROOT` | nur `mk1-debug/run_full.py` (Maintainer-Skript) |
 
+### Log-Verzeichnis
+
+Die Werkzeuge schreiben Mitschnitte und Auswertungen nach `mk1-debug/logs/`. Dieser Pfad ist im Code fest verankert (`run_full.py`, `tools/fes_src_test.py`, `tools/latency.py`, `tools/analyse_switch_bytes.py`) und per Umgebungsvariable nicht änderbar. `STIEBEL_ROOT` setzt nur die Wurzel für venv, Firmware und Backup. Ein eigener Ausgabeordner geht über `gui/auto_runner.py --out <ordner>`.
+
+Beispiel für ein Arbeitslayout mit ausgelagerten Logs: `<STIEBEL_ROOT>/daten/can-logs/` (Platzhalter, kein fester Pfad). Dorthin zeigt `--out`, die Werkzeuge selbst lesen dann nicht automatisch von dort.
+
 ## KI-Unterstützung
 
 Debug-Paket und Werkzeuge (mk1-debug, mk1-i2c, i2c_sniffer) wurden mit Unterstützung von KI erstellt (Claude von Anthropic, über Claude Code), einschließlich Code, Dokumentation und Auswerte-Werkzeugen. Die Protokoll-Analyse beruht auf eigenen Messungen am Gerät (Logic-Analyzer- und Bus-Logs) und den genannten Quellen. Die Firmware läuft beim Autor auf echter Hardware (ESP32-S3, Stiebel Eltron WPL-A 07 / LWZ 180) und ist dort getestet. Einsatz auf eigene Verantwortung. Bei Tasten- und Schreibbefehlen auf den Bus ist Vorsicht geboten.
