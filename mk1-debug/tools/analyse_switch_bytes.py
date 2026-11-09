@@ -12,7 +12,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOGS = os.path.join(os.path.dirname(HERE), "logs")
+LOGS = os.environ.get("STIEBEL_LOG_DIR") or os.path.join(os.path.dirname(HERE), "logs")
 OWN = 0x680
 PAIR_WINDOW_MS = 1500
 LO, HI = 0xF0, 0xFF

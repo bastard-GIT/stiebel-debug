@@ -24,6 +24,7 @@ import paho.mqtt.client as mqtt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEBUG_DIR = os.path.dirname(HERE)
+LOG_DIR = os.environ.get("STIEBEL_LOG_DIR") or os.path.join(DEBUG_DIR, "logs")
 sys.path.insert(0, os.path.join(DEBUG_DIR, "gui"))
 from mqtt_secrets import load_mqtt_settings  # noqa: E402
 
@@ -129,7 +130,7 @@ def main():
     host, port, user, pw = settings
 
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = os.path.join(DEBUG_DIR, "logs", f"fes_src_{stamp}")
+    out = os.path.join(LOG_DIR, f"fes_src_{stamp}")
     r = Runner(args)
     r.rx_file = open(out + "_rx.jsonl", "w", encoding="utf-8")
 

@@ -27,7 +27,7 @@ MK1_BIN = os.path.join(MK1_DIR, ".esphome", "build", "esp32-s3-technik-mk1", "bu
 BACKUP_BIN = os.path.join(ROOT, "backup", "mk1-produktiv-rxstream-fw-2026-10-21", "firmware.ota.bin")
 BACKUP_SHA256 = "66613E3079CEDBC0813A2BCC859F22211CF38B00B516DAFB84B3B57D4BB92072"
 DEVICE = os.environ.get("MK1_IP", "")  # IP des Mk1
-LOG_DIR = os.path.join(DEBUG_DIR, "logs")
+LOG_DIR = os.environ.get("STIEBEL_LOG_DIR") or os.path.join(DEBUG_DIR, "logs")
 
 _log_file = None
 

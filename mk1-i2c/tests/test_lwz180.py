@@ -71,12 +71,12 @@ def test_istwert_positive_scaled_and_unscaled():
 
 
 def test_unknown_type_is_unk_without_scale():
-    res = decode(build_istwert(0x12, 258))
+    res = decode(build_istwert(0x7e, 258))
     assert res["ok"] is True
-    assert res["name"] == "UNK_0x12"
+    assert res["name"] == "UNK_0x7e"
     assert res["value"] == 258.0
     assert res["unit"] is None
-    assert res["type"] == 0x12
+    assert res["type"] == 0x7e
 
 
 def test_bad_crc_istwert():

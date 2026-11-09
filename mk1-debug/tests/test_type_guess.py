@@ -1,6 +1,7 @@
 """Tests fuer gui/type_guess.py (ohne Qt, ohne paho)."""
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -14,7 +15,8 @@ import type_guess  # noqa: E402
 from type_guess import analyse, guess_types, load_mkgit_table  # noqa: E402
 
 NEEDS_TABLE_H = pytest.mark.skipif(not type_guess.MKGIT_DEFAULT.exists(), reason="ElsterTable.h fehlt (ELSTER_TABLE_H setzen, Quelle: ha-stiebel-control)")
-MITSCHNITT = Path(__file__).resolve().parents[1] / "logs" / "mitschnitt.jsonl"
+LOG_DIR = Path(os.environ.get("STIEBEL_LOG_DIR") or Path(__file__).resolve().parents[1] / "logs")
+MITSCHNITT = LOG_DIR / "mitschnitt.jsonl"
 
 
 def _read_csv(path: Path) -> list[dict]:

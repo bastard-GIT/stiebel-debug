@@ -81,11 +81,12 @@ Zugangsdaten stehen nicht im Repo. `secrets.yaml` (`mqtt_server`, `mqtt_port`, `
 | `ELSTER_REFERENCE_JSON` | Pfad zur `ElsterTable.json` |
 | `STIEBEL_SECRETS` | Pfad zur `secrets.yaml` |
 | `STIEBEL_MQTT_HOST`, `STIEBEL_MQTT_USER` | Vorbelegung des Verbindungsdialogs |
+| `STIEBEL_LOG_DIR` | Log-Verzeichnis für Mitschnitte und Auswertungen (Default `mk1-debug/logs`), siehe unten |
 | `MK1_IP`, `STIEBEL_ROOT` | nur `mk1-debug/run_full.py` (Maintainer-Skript) |
 
 ### Log-Verzeichnis
 
-Die Werkzeuge schreiben Mitschnitte und Auswertungen nach `mk1-debug/logs/`. Dieser Pfad ist im Code fest verankert (`run_full.py`, `tools/fes_src_test.py`, `tools/latency.py`, `tools/analyse_switch_bytes.py`) und per Umgebungsvariable nicht änderbar. `STIEBEL_ROOT` setzt nur die Wurzel für venv, Firmware und Backup. Ein eigener Ausgabeordner geht über `gui/auto_runner.py --out <ordner>`.
+Die Werkzeuge schreiben Mitschnitte und Auswertungen nach `mk1-debug/logs/`. Mit Umgebungsvariable `STIEBEL_LOG_DIR` wird dieser Ordner überschrieben (gilt für `run_full.py`, `tools/fes_src_test.py`, `tools/latency.py`, `tools/analyse_switch_bytes.py` und den Mitschnitt-Test in `tests/test_type_guess.py`). Ohne Variable bleibt der Default `mk1-debug/logs/`. `STIEBEL_ROOT` setzt nur die Wurzel für venv, Firmware und Backup. Ein eigener Ausgabeordner für `gui/auto_runner.py` geht weiterhin über `--out <ordner>`; `run_full.py` übergibt dafür seinen Log-Ordner (also auch den aus `STIEBEL_LOG_DIR`) als `--out`.
 
 Beispiel für ein Arbeitslayout mit ausgelagerten Logs: `<STIEBEL_ROOT>/daten/can-logs/` (Platzhalter, kein fester Pfad). Dorthin zeigt `--out`, die Werkzeuge selbst lesen dann nicht automatisch von dort.
 

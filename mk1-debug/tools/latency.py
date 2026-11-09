@@ -5,7 +5,7 @@ import os
 from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOGS = os.path.join(os.path.dirname(HERE), "logs")
+LOGS = os.environ.get("STIEBEL_LOG_DIR") or os.path.join(os.path.dirname(HERE), "logs")
 WINDOW_MS = 2000
 
 
