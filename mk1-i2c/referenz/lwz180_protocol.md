@@ -299,6 +299,8 @@ Indizes 0-basiert im Display-Paket ohne Adressbyte (`seg[0]` = f7, `seg[1]` = 20
 | 23/6 | Frost | nur README+3 |
 | 26/0 | LED Power Vent | Sketch |
 
+Nachtrag 2026-11-11: `esphome-lwz-180` (Commit 018ef9d, Mk1-Firmware 2026.11.10) wertet 23/0, 23/6, 24/2, 15/0, 18/2 und 26/0 als binary_sensor aus, nur im Grundzustand, aus erst nach 60 s ohne Bit. 23/0 im Grundzustand = Filterwechsel-Meldung am Geraet bestaetigt (Display zeigte die Meldung, Sensor `on`, Filterlaufzeit 5a = 2162 h; Schwelle vermutlich 2160 h = 90 Tage). 23/6 Frost und 18/2 Schloss weiter unbestaetigt.
+
 - Bekannt unklar: 13/0, 13/2, 13/4 fast immer an (beim Zeit-Editieren in P81 statt dessen 13/3, 13/5), 14/0, 14/2, 14/4, 14/6 in allen Menueanzeigen an, im Standby aus. Auf den Fotos nichts sichtbar, vermutlich nicht LCD (Tasten-LED/Blinksteuerung?).
 - Zusaetzliche Zeichen (Tabelle 6.3): `0x54` n, `0x38` L, `0x79` E, `0x71` F, `0x76` H, `0x3e` U, `0x74` h, `0x58` c, `0x1e` J (`0x5e` d, `0x77` A, `0x1c` u bereits enthalten). Gesehene Anzeigen: "Cod", "Pro", "Auto", "0FF", "----", "0n".
 - Mitschnitt: 6056 Frames, `err_bits` 0, 15 abgeschnittene Pakete (`err_nostop`), alle vollstaendigen Istwert- (5328) und Display-Pakete (455) mit CRC ok. Kanalzuordnung SCL = "Channel 4", SDA = Spalte "VDD". `i2c.txt` gehoert zum frueheren kurzen Mitschnitt.
