@@ -27,7 +27,7 @@ MQTT-Topics (Format: `mk1-debug/INTERFACES.md`):
 | Topic | Inhalt |
 |---|---|
 | `stiebel-debug/rx` | Batch empfangener CAN-Frames (hoechstens alle 50 ms) |
-| `stiebel-debug/status` | Zaehler und Status alle 5 s |
+| `stiebel-debug/status` | Zaehler und Status alle 5 s. TWAI-Felder: `twai_err` (Busfehler gesamt), `bus_off`, `rx_missed` (TWAI-RX-Queue voll, Frame verworfen), `rx_overrun` (Hardware-FIFO uebergelaufen), `rx_queue` (wartende Frames), `tec`/`rec` (Fehlerzaehler) |
 | `stiebel-debug/availability` | `online`, retained |
 | `stiebel-debug/cmd/sniff` | Kommando, z.B. `{"on":true,"ids":["0x180"],"types":[2]}`. Sniffer ist standardmaessig AUS |
 

@@ -130,20 +130,63 @@ void dbgrx_flush() {
   mkdbg::mqtt_publish("stiebel-debug/rx", mkdbg::rx_buf, len);
 }
 
+// TWAI-Treiberzaehler fuer den Status. Bewusst hier und nicht in debug_json.h: im Produktiv-Build
+// gewinnt die gleichnamige Kopie aus lwz_180/ (gleicher Include-Guard), Aenderungen dort kaemen nicht an.
+namespace mkdbg {
+struct TwaiDiag {
+  uint32_t rx_missed;   // Frames verworfen, weil die TWAI-RX-Queue voll war
+  uint32_t rx_overrun;  // Frames verloren durch Ueberlauf des Hardware-RX-FIFO
+  uint32_t rx_queue;    // Frames, die gerade in der TWAI-RX-Queue warten
+  uint32_t tec;         // Sende-Fehlerzaehler
+  uint32_t rec;         // Empfangs-Fehlerzaehler
+};
+
+// Haengt die TWAI-Felder an ein fertiges Status-JSON an (ersetzt die schliessende Klammer).
+// Ergebnis: {...,"ntp":true,"rx_missed":0,"rx_overrun":0,"rx_queue":0,"tec":0,"rec":0}
+inline size_t append_twai_diag(char *out, size_t cap, size_t len, const TwaiDiag &td) {
+  if (len == 0 || out[len - 1] != '}') return len;
+  size_t pos = len - 1;
+  bool ok = dj_put(out, cap, pos, ",\"rx_missed\":")
+    && dj_putf(out, cap, pos, "%lu", (unsigned long)td.rx_missed)
+    && dj_put(out, cap, pos, ",\"rx_overrun\":")
+    && dj_putf(out, cap, pos, "%lu", (unsigned long)td.rx_overrun)
+    && dj_put(out, cap, pos, ",\"rx_queue\":")
+    && dj_putf(out, cap, pos, "%lu", (unsigned long)td.rx_queue)
+    && dj_put(out, cap, pos, ",\"tec\":")
+    && dj_putf(out, cap, pos, "%lu", (unsigned long)td.tec)
+    && dj_put(out, cap, pos, ",\"rec\":")
+    && dj_putf(out, cap, pos, "%lu", (unsigned long)td.rec)
+    && dj_put(out, cap, pos, "}");
+  if (!ok) {            // passt nicht: altes Status-JSON unveraendert lassen
+    out[len - 1] = '}';
+    out[len] = 0;
+    return len;
+  }
+  return pos;
+}
+}  // namespace mkdbg
+
 // Status alle 5 s. TWAI-Werte nur lesend; Recovery bleibt bei publishCanDiagnostics().
 void dbgrx_publish_status() {
   uint32_t twai_err = 0;
   bool bus_off = false;
+  mkdbg::TwaiDiag td = {0, 0, 0, 0, 0};
   twai_status_info_t ts;
   if (twai_get_status_info(&ts) == ESP_OK) {
     twai_err = ts.bus_error_count;
     bus_off = (ts.state == TWAI_STATE_BUS_OFF);
+    td.rx_missed = ts.rx_missed_count;
+    td.rx_overrun = ts.rx_overrun_count;
+    td.rx_queue = ts.msgs_to_rx;
+    td.tec = ts.tx_error_counter;
+    td.rec = ts.rx_error_counter;
   }
-  char buf[256];
+  char buf[384];
   size_t n = mkdbg::format_status(mkdbg::rx_count, mkdbg::tx_count,
                                   mkdbg::rx_ring.size(), mkdbg::rx_ring.capacity(),
                                   mkdbg::rx_ring.overflow(), twai_err, bus_off,
                                   (uint32_t)esp_get_free_heap_size(), mkdbg::ntp_synced(), buf, sizeof buf);
+  n = mkdbg::append_twai_diag(buf, sizeof buf, n, td);
   if (n > 0) mkdbg::mqtt_publish("stiebel-debug/status", buf, n);
   // Availability alle 5 s erneuern (retained): ein spaeter ausgeloester Last Will einer anderen
   // Firmware (z.B. mk1-debug nach dem Umflashen) wuerde sonst "offline" stehen lassen.
