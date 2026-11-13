@@ -1,6 +1,6 @@
 """Zwei Tabellen aus dem Scan-State: bekannte (Referenz) und unbekannte Elster-IDs, Werte je CAN-Member.
 Aufruf: python -I analyse_tables.py <state.json>
-Ausgabe: <prefix>_bekannt.csv/.md und <prefix>_unbekannt.csv/.md
+Ausgabe: <prefix>_bekannt.csv/.md, <prefix>_unbekannt.csv/.md und <prefix>_verfuegbarkeit.csv/.md
 """
 import csv
 import json
@@ -20,6 +20,14 @@ ALL_TYPES = ["et_dec_val", "et_cent_val", "et_mil_val", "et_byte", "et_bool", "e
              "et_dev_nr", "et_dev_id", "et_err_nr", "et_default"]
 SHORT = {t: t[3:] for t in ALL_TYPES}
 UNSUP = 0x8000
+# Kategorie "Verfuegbarkeit": Indizes, die der Manager beim Boot als 0x0001 (vorhanden) / 0x8000 (nicht vorhanden)
+# an das Bedienteil meldet. Grenzen = kleinster und groesster beobachteter Index je Block, Quelle
+# daten/can-logs/boot_20261113_verfuegbarkeit.md, keine geschaetzten Bereiche.
+VERFUEGBARKEIT_BLOECKE = [(40002, 40127), (40901, 40923), (41001, 41064), (44001, 44033), (46001, 46019), (48001, 48035)]
+
+
+def ist_verfuegbarkeit(idx):
+    return any(lo <= idx <= hi for lo, hi in VERFUEGBARKEIT_BLOECKE)
 
 
 def num(v):
@@ -160,6 +168,8 @@ def main(path):
             guess = ", ".join(f"{n}:{s}" for n, s, _ in g[:3])
         rows2.append([f"0x{idx:04x}", name or "(unbekannt)", typ, sum(1 for c in per if c), mmtxt, guess, alle] + per)
     h2 = ["index", "name_mkgit", "typ_mkgit", "n_member", "min..max", "typ_vermutung", "alle_typen(erster Wert)"] + cols
+    rowsV = [r for r in rows2 if ist_verfuegbarkeit(int(r[0], 16))]
+    rows2 = [r for r in rows2 if not ist_verfuegbarkeit(int(r[0], 16))]
     with open(base + "_unbekannt.csv", "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f, delimiter=";", lineterminator="\r\n")
         w.writerow(h2)
@@ -168,11 +178,20 @@ def main(path):
     write_md(base + "_unbekannt.md", f"Unbekannte IDs ({len(rows2)}), Name aus mk-git (wpl10ac)", h2, [[r[0], r[1], r[2], r[3], "", "", ""] + r[6:] for r in lrows] + rows2,
              "Mit mk-git-Typ (nicht et_default): Wert in Klammern dekodiert. Sonst alle Typen probiert (Spalte "
              "alle_typen, Wert des ersten antwortenden Members) und Typ-Vermutung aus allen Rohwerten + Min/Max.")
+    with open(base + "_verfuegbarkeit.csv", "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f, delimiter=";", lineterminator="\r\n")
+        w.writerow(h2)
+        w.writerows([[r[0], r[1], r[2], r[3], "", "", ""] + r[6:] for r in lrows])
+        w.writerows(rowsV)
+    write_md(base + "_verfuegbarkeit.md", f"Verfuegbarkeits-Indizes ({len(rowsV)}) aus dem Boot-Burst, Name aus mk-git", h2, [[r[0], r[1], r[2], r[3], "", "", ""] + r[6:] for r in lrows] + rowsV,
+             "Quelle: daten/can-logs/boot_20261113_verfuegbarkeit.md (Boot-Burst boot_20261113). 0x0001 = vorhanden, 0x8000 = nicht vorhanden. "
+             "Gleiche Zeilenbildung wie unbekannt.")
     named = sum(1 for r in rows2 if r[1] != "(unbekannt)")
     print("bekannt:", len(rows1), "mit Wert:", sum(1 for r in rows1 if any(c and c != 'nicht unterst.' for c in r[6:])))
     print("unbekannt:", len(rows2), "davon Name in mk-git:", named, "ohne Namen:", len(rows2) - named)
+    print("verfuegbarkeit:", len(rowsV))
     print("Member-Spalten:", cols)
-    print(base + "_bekannt.csv", base + "_unbekannt.csv")
+    print(base + "_bekannt.csv", base + "_unbekannt.csv", base + "_verfuegbarkeit.csv")
 
 
 if __name__ == "__main__":
