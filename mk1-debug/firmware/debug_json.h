@@ -165,6 +165,12 @@ static inline bool dj_get_switch(const char *json, uint8_t &out) {
   if (strcmp(s, "fa") == 0) { out = 0xFA; return true; }
   if (strcmp(s, "f8") == 0) { out = 0xF8; return true; }
   if (strcmp(s, "f9") == 0) { out = 0xF9; return true; }
+  // Test: beliebiges Byte 0xF0..0xFF als d2 im Langformat (Antwort-Abgleich nur fuer F7..FA)
+  if (s[0] == 'f' && s[2] == '\0' &&
+      ((s[1] >= '0' && s[1] <= '9') || (s[1] >= 'a' && s[1] <= 'f'))) {
+    out = (uint8_t)(0xF0 + (s[1] <= '9' ? s[1] - '0' : s[1] - 'a' + 10));
+    return true;
+  }
   return false;
 }
 

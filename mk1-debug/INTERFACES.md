@@ -222,6 +222,10 @@ CLI: `python -I auto_runner.py --out <dir> [--secrets ../secrets.yaml] [--delay 
 
 ### 8.3 MQTT-Erweiterung (additiv)
 - `cmd/read` und `cmd/scan`: optional `"switch":"fa"|"f8"|"f9"` (auch `"0xfa"` usw., Groß-/Kleinschreibung egal), Standard `fa`; ungültig → Kommando wird abgelehnt.
+  Seit 2026-11-15 zum Testen auch jedes andere Byte `f0`–`ff` (Langformat `[d0,d1,sw,ih,il,0,0]`). Der Antwort-Abgleich
+  kennt nur F7–FA; bei den übrigen Bytes kommt `timeout`, die Antwort steht im Sniffer-Stream. Messung WPL-A 07:
+  F7 mit echtem Index liefert `0x8000`; F0–F4, FB–FD, FF antworten im Kurzlayout ohne Index-Echo, F5/F6 gar nicht
+  (`daten/can-logs/f7test_20261115.jsonl`, `f0test_20261115.jsonl` im Projektordner).
 - `read/result`: zusätzlich `"switch":"0xfa"`. `scan/progress` und `scan/result` (Top-Level, neben `format`): zusätzlich `"switch":"0xfa"`. Fehlt das Feld (ältere Firmware), gilt `0xFA`.
 - `gui/mqtt_client.py`: `send_read(member, index, fmt=None, switch=None)`, `send_scan(member, from_idx, to_idx, delay_ms, fmt=None, switch=None)`: `fmt` in `None|"auto"|"short"|"long"` (Payload-Feld `format` nur wenn nicht `None`/`"auto"`), `switch` in `None|0xFA|0xF8|0xF9` (Payload-Feld nur wenn nicht `None`/`0xFA`, als `"0xf8"`). `read_result`/`scan_progress`/`scan_result` Signal-Dicts enthalten immer `"switch"` als `int` (Standard `0xFA`), `scan_result["items"]` ebenfalls je Item.
 - Availability: `mqtt_client.py` abonniert zusätzlich `heatingpump/status` (Payload `online`/`offline`, Produktiv-Firmware). Neues Signal `availability_source = Signal(str)` mit `"debug"` (Topic `stiebel-debug/availability`) oder `"produktiv"` (Topic `heatingpump/status`), emittiert unmittelbar vor `availability`. Offline gewinnt, wenn eines der beiden Topics `offline` meldet (zuletzt gemeldeter Zustand je Quelle merken; effektiv `online` nur wenn keine Quelle `offline` meldet und mindestens eine `online`).
