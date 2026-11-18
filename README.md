@@ -12,11 +12,13 @@ Einbindung in die Firmware-YAML:
 
 ```yaml
 packages:
-  stiebel_debug: github://bastard-GIT/stiebel-debug/stiebel_debug.yaml@main
+  stiebel_debug: github://bastard-GIT/stiebel-debug/stiebel_debug.yaml@mk1-2026.11.19
 ```
 
+Empfohlen ist ein fester Tag statt `@main`, damit der Build reproduzierbar bleibt.
+
 Voraussetzung: Waermepumpen-Firmware mit den Hook-Makros `STIEBEL_DEBUG_RX(id, x)` und `STIEBEL_DEBUG_TX(id, x)`
-(Fork `bastard-GIT/ha-stiebel-control`, Branch `wpla07`). Das Paket setzt `-DSTIEBEL_DEBUG`, bindet `stiebel_debug/`
+(Fork `bastard-GIT/ha-stiebel-control`, Branch `wpla07-modular`). Das Paket setzt `-DSTIEBEL_DEBUG`, bindet `stiebel_debug/`
 ein und nutzt `::esphome::mqtt::global_mqtt_client` (keine feste MQTT-id noetig). Ohne das Paket sind die Makros leer.
 
 Das Paket bringt selbst mit: `mqtt.on_connect` (availability online, retained), `mqtt.on_message` fuer
