@@ -117,10 +117,10 @@ C:\temp\stiebel-Remote\.venv\Scripts\python.exe gui\elster_gui.py
 ```
 
 - **Verbinden:** Broker, Port und Benutzer eingeben. Das Passwort wird bei jedem Start abgefragt und nicht gespeichert.
-- **Tab Live:** Rohframes und dekodierte Werte. Filter nach CAN-ID, Nachrichtenart und Index/Name. Pause, Löschen, Autoscroll. Ansicht umschaltbar zwischen allen Frames und dem letzten Wert pro Index. Schaltfläche zum Senden der Sniffer-Filter an die Firmware.
+- **Tab Live:** Rohframes und dekodierte Werte. Filter nach CAN-ID, Nachrichtenart und Index/Name. Pause, Löschen, Autoscroll. Ansicht umschaltbar zwischen allen Frames und dem letzten Wert pro Index. Schaltfläche zum Senden der Sniffer-Filter an die Firmware. Bei der Produktiv-Firmware filtert die GUI selbst (die Firmware kennt keinen Filter) und zeigt den Sniffer-Zustand der Firmware an.
 - **Tab Abfrage:** Member aus der Liste wählen, Index per Hex oder Namenssuche angeben. Das Ergebnis wird dekodiert angezeigt, der Verlauf als Tabelle.
 - **Tab Scanner:** Member, Indexbereich und Pause (mindestens 100 ms, Standard 200 ms) eingeben. Start und Stopp, Fortschrittsanzeige, Trefferliste mit Namen aus der Referenz oder `UNK_0x…`.
-- **Tab Status:** Zähler aus dem Status-Topic (RX, TX, Füllstand des Ringpuffers, Überläufe, TWAI-Fehler, Bus-Off).
+- **Tab Status:** Zähler aus dem Status-Topic (RX, TX, Füllstand des Ringpuffers, Überläufe, TWAI-Fehler, Bus-Off). Felder, die die Firmware nicht sendet (bei der Produktiv-Firmware fast alle außer RX und Heap), zeigt die Anzeige als `-`.
 - **Exporte:** Mitschnitt als CSV oder als Rohlog (JSON-Lines). Trefferliste des Scanners als CSV. Abgleich mit der Referenz: bekannt, unbekannt oder anderer Typ.
 - **Offline-Log:** Über Menü Datei → Offline-Log laden kann ein gespeichertes Rohlog ohne Verbindung dekodiert angezeigt werden.
 
@@ -140,6 +140,19 @@ Präfix: `stiebel-debug/`
 | `scan/result` | ESP → GUI | `{"member":"0x500","items":[{"index":"0x4e40","raw":"0x0123","status":"ok"}]}` |
 | `status` | ESP → GUI | `{"rx":0,"tx":0,"rx_fill":0,"rx_cap":4096,"overflow":0,"twai_err":0,"bus_off":false,"heap":0}` |
 | `availability` | ESP → GUI | `online` / `offline` (retained, Last Will) |
+
+### Produktiv-Firmware
+
+Topic-Wurzel `heatingpump/` (Konstante `PROD_ROOT` in `gui/mqtt_client.py`). Die GUI erkennt die Firmware-Art am Feld `fw` in `stiebel-debug/status` (fehlt es, gilt `prod`).
+
+| Topic | Richtung | Inhalt |
+|---|---|---|
+| `heatingpump/status` | ESP → GUI | `online` / `offline` (Verfügbarkeit) |
+| `heatingpump/can_debug/set` | GUI → ESP | `on` / `off` – Sniffer an/aus, kein Filter |
+| `heatingpump/can_debug/state` | ESP → GUI | `on` / `off` (retained) – Zustand des Sniffers |
+| `heatingpump/can_debug/frames` | ESP → GUI | Batch wie `rx`, aber ohne `u`: `[{"t":123456,"id":"0x180","d":"d200fa01120200","tx":false}]` |
+
+Im Produktiv-Modus gilt der Filter (CAN-ID, Art) nur in der GUI. Die Zeitstempel stammen aus der Schätzung über `t` (`ts_src` = `pc`). Details: `INTERFACES.md`, Abschnitt 8.7.
 
 Status-Werte in `read/result` und `scan/result`: `ok`, `unsupported` (Rohwert `0x8000`), `timeout`.
 

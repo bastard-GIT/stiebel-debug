@@ -19,6 +19,21 @@ COLOR_NEUTRAL = "#616161"
 _now = time.monotonic
 
 
+def _opt_int(st: dict, key: str) -> int | None:
+    """Ganzzahl aus Status-Feld; fehlt das Feld oder ist es kein int-Wert, None."""
+    value = st.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _show(value: int | None) -> str:
+    return "-" if value is None else str(value)
+
+
 def _colored(label: QLabel, text: str, color: str | None = None, bold: bool = False) -> None:
     label.setText(text)
     style = []
@@ -125,20 +140,22 @@ class StatusTab(QWidget):
             _colored(self._lbl_conn, "getrennt", COLOR_WARN)
 
     def _on_status(self, st: dict) -> None:
+        """Status-Meldung anzeigen. Fehlende oder ungueltige Felder (Produktiv-Firmware liefert
+        nur fw, rx, heap, ntp und bei TWAI die Fehlerzaehler) zeigen "-" statt abzustuerzen."""
         now = _now()
 
-        rx = int(st.get("rx", 0))
-        tx = int(st.get("tx", 0))
-        fill = int(st.get("rx_fill", 0))
-        cap = int(st.get("rx_cap", 0))
-        overflow = int(st.get("overflow", 0))
-        twai_err = int(st.get("twai_err", 0))
-        bus_off = bool(st.get("bus_off", False))
-        heap = int(st.get("heap", 0))
+        rx = _opt_int(st, "rx")
+        tx = _opt_int(st, "tx")
+        fill = _opt_int(st, "rx_fill")
+        cap = _opt_int(st, "rx_cap")
+        overflow = _opt_int(st, "overflow")
+        twai_err = _opt_int(st, "twai_err")
+        bus_off = st.get("bus_off")
+        heap = _opt_int(st, "heap")
 
         # Frames/s aus der Differenz zu vorheriger Meldung. Zaehler-Reset
         # (ESP-Neustart, rx kleiner als zuvor) gilt als neue Basis.
-        if self._prev_rx is None or self._prev_rx_time is None or rx < self._prev_rx:
+        if rx is None or self._prev_rx is None or self._prev_rx_time is None or rx < self._prev_rx:
             fps_text = "-"
         else:
             dt = now - self._prev_rx_time
@@ -147,32 +164,45 @@ class StatusTab(QWidget):
             else:
                 fps_text = "-"
         self._prev_rx = rx
-        self._prev_rx_time = now
+        self._prev_rx_time = now if rx is not None else None
 
-        self._lbl_rx.setText(str(rx))
-        self._lbl_tx.setText(str(tx))
+        self._lbl_rx.setText(_show(rx))
+        self._lbl_tx.setText(_show(tx))
         self._lbl_fps.setText(fps_text)
 
-        percent = int(fill * 100 / cap) if cap > 0 else 0
-        percent = max(0, min(100, percent))
-        self._bar_rx.setValue(percent)
-        self._lbl_rx_fill.setText(f"{fill} / {cap}")
-        if overflow > 0:
+        if fill is None or cap is None:
+            self._bar_rx.setValue(0)
+            self._lbl_rx_fill.setText("-")
+        else:
+            percent = int(fill * 100 / cap) if cap > 0 else 0
+            percent = max(0, min(100, percent))
+            self._bar_rx.setValue(percent)
+            self._lbl_rx_fill.setText(f"{fill} / {cap}")
+        if overflow is None:
+            _colored(self._lbl_overflow, "-")
+        elif overflow > 0:
             _colored(self._lbl_overflow, str(overflow), COLOR_WARN)
         else:
             _colored(self._lbl_overflow, str(overflow), COLOR_OK)
 
         # Fehler steigend: Warnfarbe nur bei Anstieg gegenueber letzter Meldung.
-        rising = self._prev_twai_err is not None and twai_err > self._prev_twai_err
-        self._prev_twai_err = twai_err
+        rising = (
+            twai_err is not None
+            and self._prev_twai_err is not None
+            and twai_err > self._prev_twai_err
+        )
+        if twai_err is not None:
+            self._prev_twai_err = twai_err
         if rising:
             _colored(self._lbl_twai, str(twai_err), COLOR_WARN)
         else:
-            _colored(self._lbl_twai, str(twai_err))
+            _colored(self._lbl_twai, _show(twai_err))
 
-        if bus_off:
+        if bus_off is None:
+            _colored(self._lbl_bus_off, "-")
+        elif bool(bus_off):
             _colored(self._lbl_bus_off, "JA", COLOR_WARN)
         else:
             _colored(self._lbl_bus_off, "nein", COLOR_OK)
 
-        self._lbl_heap.setText(str(heap))
+        self._lbl_heap.setText(_show(heap))

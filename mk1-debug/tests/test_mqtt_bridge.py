@@ -556,3 +556,154 @@ def test_connect_resets_firmware_to_unknown(bridge_and_client, monkeypatch):
     bridge.connect_to("broker", 1883, "user", "pw")
     assert kinds == ["debug", "unknown"]
     assert bridge._fw == "unknown"
+
+
+# ---------------------------------------------------------------- Produktiv-Sniffer (can_debug)
+
+class RawClient(FakeClient):
+    """Wie FakeClient, speichert aber den Rohtext (Schalter-Payload "on"/"off" ist kein JSON)."""
+
+    def publish(self, topic, payload, qos=0):
+        self.published.append((topic, payload))
+
+
+def _collect_frames(bridge):
+    frames = []
+    bridge.rx_frames.connect(lambda batch: frames.extend(batch))
+    return frames
+
+
+def test_prod_topic_constants_derive_from_root():
+    assert mqtt_client.PROD_ROOT == "heatingpump"
+    assert mqtt_client.PROD_AVAILABILITY_TOPIC == "heatingpump/status"
+    assert mqtt_client.PROD_CAN_DEBUG_FRAMES == "heatingpump/can_debug/frames"
+    assert mqtt_client.PROD_CAN_DEBUG_STATE == "heatingpump/can_debug/state"
+    assert mqtt_client.PROD_CAN_DEBUG_SET == "heatingpump/can_debug/set"
+
+
+def test_subscribes_to_can_debug_topics(bridge_and_client):
+    bridge, _ = bridge_and_client
+    sub_client = FakeClient()
+    bridge._on_connect(sub_client, None, None, 0)
+    assert "heatingpump/can_debug/frames" in sub_client.subscribed
+    assert "heatingpump/can_debug/state" in sub_client.subscribed
+    assert "stiebel-debug/rx" in sub_client.subscribed
+
+
+def test_prod_frames_without_u_get_pc_time(bridge_and_client):
+    bridge, _ = bridge_and_client
+    frames = _collect_frames(bridge)
+    bridge._now = lambda: 100.0
+    bridge._on_message(None, None, msg("heatingpump/can_debug/frames",
+                                       [{"t": 1000, "id": "0x180", "d": "d20000", "tx": False}]))
+    assert len(frames) == 1
+    assert frames[0]["id"] == 0x180
+    assert frames[0]["ts_src"] == "pc"
+    assert frames[0]["ts"] == pytest.approx(100.0)  # Ankunft 100 s, t = 1 s nach Boot
+
+
+def test_prod_frames_with_u_use_esp_time(bridge_and_client):
+    bridge, _ = bridge_and_client
+    frames = _collect_frames(bridge)
+    bridge._on_message(None, None, msg("heatingpump/can_debug/frames",
+                                       [{"t": 1000, "u": 1700000000123, "id": "0x500", "d": "00",
+                                         "tx": True}]))
+    assert frames[0]["ts_src"] == "esp"
+    assert frames[0]["ts"] == pytest.approx(1700000000.123)
+    assert frames[0]["tx"] is True
+
+
+def test_prod_frames_broken_items_are_skipped(bridge_and_client):
+    bridge, _ = bridge_and_client
+    frames = _collect_frames(bridge)
+    bridge._now = lambda: 10.0
+    bridge._on_message(None, None, msg("heatingpump/can_debug/frames",
+                                       [{"t": 5, "id": "0x180"}, {"t": 6, "id": "0x181", "d": "00",
+                                                                  "tx": False}]))
+    assert [f["id"] for f in frames] == [0x181]
+    bridge._on_message(None, None, msg("heatingpump/can_debug/frames", {"no": "list"}))
+    bridge._on_message(None, None, msg("heatingpump/can_debug/frames", b"\xff kein json"))
+    assert len(frames) == 1
+
+
+def test_can_debug_state_emits_bool(bridge_and_client):
+    bridge, _ = bridge_and_client
+    states = []
+    bridge.can_debug_state.connect(states.append)
+    bridge._on_message(None, None, msg("heatingpump/can_debug/state", "on"))
+    bridge._on_message(None, None, msg("heatingpump/can_debug/state", "off\n"))
+    bridge._on_message(None, None, msg("heatingpump/can_debug/state", "vielleicht"))
+    assert states == [True, False]
+
+
+def test_send_sniff_prod_uses_can_debug_set(bridge_and_client):
+    bridge, _ = bridge_and_client
+    raw = RawClient()
+    bridge._client = raw
+    bridge._on_message(None, None, msg("stiebel-debug/status", {"rx": 0, "heap": 1}))  # prod
+    bridge.send_sniff(True, [0x180], [2])
+    bridge.send_sniff(False, [], [])
+    assert raw.published == [("heatingpump/can_debug/set", "on"),
+                             ("heatingpump/can_debug/set", "off")]
+
+
+def test_send_sniff_debug_uses_cmd_sniff(bridge_and_client):
+    bridge, client = bridge_and_client
+    bridge._on_message(None, None, msg("stiebel-debug/status", {"fw": "debug"}))
+    bridge.send_sniff(True, [0x180], [2])
+    assert client.published == [("stiebel-debug/cmd/sniff",
+                                 {"on": True, "ids": ["0x180"], "types": [2]})]
+
+
+def test_send_sniff_unknown_firmware_sends_to_both(bridge_and_client):
+    bridge, _ = bridge_and_client
+    raw = RawClient()
+    bridge._client = raw
+    assert bridge._fw == "unknown"
+    bridge.send_sniff(False, [], [])
+    assert len(raw.published) == 2
+    assert raw.published[0] == ("heatingpump/can_debug/set", "off")
+    topic, payload = raw.published[1]
+    assert topic == "stiebel-debug/cmd/sniff"
+    assert json.loads(payload) == {"on": False, "ids": [], "types": []}
+
+
+def test_status_tab_tolerates_prod_status(qapp):
+    fake = FakeBridge()
+    tab = tab_status.StatusTab(fake)
+    # Produktiv-Status: nur fw, rx, heap, ntp; TWAI-Felder nur bei TWAI
+    fake.status.emit({"fw": "prod", "rx": 42, "heap": 123456, "ntp": True})
+    assert tab._lbl_rx.text() == "42"
+    assert tab._lbl_heap.text() == "123456"
+    assert tab._lbl_tx.text() == "-"
+    assert tab._lbl_rx_fill.text() == "-"
+    assert tab._lbl_overflow.text() == "-"
+    assert tab._lbl_twai.text() == "-"
+    assert tab._lbl_bus_off.text() == "-"
+
+
+def test_status_tab_tolerates_null_and_broken_fields(qapp):
+    fake = FakeBridge()
+    tab = tab_status.StatusTab(fake)
+    fake.status.emit({"rx": None, "tx": "abc", "rx_fill": None, "rx_cap": 0,
+                      "twai_err": float("inf"), "bus_off": None, "heap": [1]})
+    assert tab._lbl_rx.text() == "-"
+    assert tab._lbl_tx.text() == "-"
+    assert tab._lbl_fps.text() == "-"
+    assert tab._lbl_rx_fill.text() == "-"
+    assert tab._lbl_twai.text() == "-"
+    assert tab._lbl_bus_off.text() == "-"
+    assert tab._lbl_heap.text() == "-"
+
+
+def test_status_tab_counts_fps_and_bus_off(qapp, monkeypatch):
+    fake = FakeBridge()
+    tab = tab_status.StatusTab(fake)
+    clock = iter([0.0, 2.0])
+    monkeypatch.setattr(tab_status, "_now", lambda: next(clock))
+    fake.status.emit({"rx": 10, "tx": 1, "rx_fill": 5, "rx_cap": 10, "overflow": 0,
+                      "twai_err": 0, "bus_off": True, "heap": 7})
+    fake.status.emit({"rx": 30})
+    assert tab._lbl_fps.text() == "10.0"
+    assert tab._lbl_rx_fill.text() == "5 / 10"
+    assert tab._lbl_bus_off.text() == "JA"

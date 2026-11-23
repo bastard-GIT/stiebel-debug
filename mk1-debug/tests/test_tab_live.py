@@ -111,3 +111,69 @@ def test_system_frames_not_in_latest(app, db):
     proxy.setSourceModel(model)
     proxy.set_filters([], None, "", True)
     assert proxy.rowCount() == 0
+
+
+# ---------------------------------------------------------------- Produktiv-Sniffer (clientseitiger Filter)
+
+from PySide6.QtCore import QObject, Signal  # noqa: E402
+
+from mqtt_client import FW_DEBUG, FW_PROD  # noqa: E402
+
+
+class _FakeBridge(QObject):
+    rx_frames = Signal(list)
+    firmware_kind = Signal(str)
+    can_debug_state = Signal(bool)
+
+    def __init__(self):
+        super().__init__()
+        self.sent = []
+
+    def send_sniff(self, on, ids, types):
+        self.sent.append((on, ids, types))
+
+
+def test_frame_matches_id_and_type():
+    assert tab_live._frame_matches(F8, [], None)
+    assert tab_live._frame_matches(F8, [0x180], None)
+    assert not tab_live._frame_matches(F8, [0x500], None)
+    assert tab_live._frame_matches(F8, [], 2)          # F8 hat msg_type 2 (response)
+    assert not tab_live._frame_matches(F8, [], 1)
+    assert not tab_live._frame_matches({"id": 0x180, "data": b""}, [], 2)
+
+
+def test_live_prod_filters_incoming_frames(app, db):
+    fake = _FakeBridge()
+    tab = tab_live.LiveTab(db, fake)
+    fake.firmware_kind.emit(FW_PROD)
+    tab._id_edit.setText("0x500")
+    tab._on_rx_frames([F8, dict(F8, id=0x500)])
+    assert [f["id"] for f in tab._pending] == [0x500]
+
+
+def test_live_debug_keeps_all_frames(app, db):
+    fake = _FakeBridge()
+    tab = tab_live.LiveTab(db, fake)
+    fake.firmware_kind.emit(FW_DEBUG)
+    tab._id_edit.setText("0x500")
+    tab._on_rx_frames([F8, dict(F8, id=0x500)])
+    assert len(tab._pending) == 2
+
+
+def test_live_prod_state_syncs_checkbox_without_sending(app, db):
+    fake = _FakeBridge()
+    tab = tab_live.LiveTab(db, fake)
+    fake.firmware_kind.emit(FW_PROD)
+    fake.can_debug_state.emit(True)
+    assert tab._sniff_check.isChecked()
+    fake.can_debug_state.emit(False)
+    assert not tab._sniff_check.isChecked()
+    assert fake.sent == []
+
+
+def test_live_debug_ignores_prod_state(app, db):
+    fake = _FakeBridge()
+    tab = tab_live.LiveTab(db, fake)
+    fake.firmware_kind.emit(FW_DEBUG)
+    fake.can_debug_state.emit(True)
+    assert not tab._sniff_check.isChecked()

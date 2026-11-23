@@ -237,7 +237,23 @@ CLI: `python -I auto_runner.py --out <dir> [--secrets ../secrets.yaml] [--delay 
 
 ### 8.5 Produktiv-Firmware (`esp32-s3-technik-mk1/ha-stiebel-control/`)
 - Neuer Header `can_rx_stream.h` (+ Kopien `ring_buffer.h`, `debug_json.h` aus `mk1-debug/firmware/`), `namespace mkdbg`, Funktionen: `void dbgrx_on_frame(uint32_t can_id, const std::vector<uint8_t>&)`, `void dbgrx_note_tx(uint32_t can_id, const std::vector<uint8_t>&)`, `void dbgrx_on_command(const std::string& suffix, const std::string& payload)` (nur `"sniff"`), `void dbgrx_flush()`, `void dbgrx_publish_status()`.
-- Topics wie Abschnitt 1: `stiebel-debug/rx`, `stiebel-debug/status`, `stiebel-debug/availability` (`online`, retained, beim MQTT-Connect), Kommando `stiebel-debug/cmd/sniff`. Sniffer Standard AUS. Keine Kommandos read/scan/probe/stop.
+- Topics: `stiebel-debug/status`, `heatingpump/status` (Availability, `online`/`offline`). Der Sniffer-Stream läuft über `heatingpump/can_debug/*` (siehe 8.7), nicht mehr über `stiebel-debug/rx`/`cmd/sniff`. Keine Kommandos read/scan/probe/stop.
+
+### 8.7 Produktiv-Sniffer `heatingpump/can_debug/*` (GUI-Seite, 2026-11-23)
+Die Produktiv-Firmware hat `stiebel-debug/rx` und `stiebel-debug/cmd/sniff` nicht mehr. Stattdessen (Topic-Wurzel `PROD_ROOT = "heatingpump"` in `mqtt_client.py`, alle Produktiv-Topics daraus abgeleitet):
+
+| Topic | Richtung | Payload |
+|---|---|---|
+| `heatingpump/can_debug/set` | GUI → ESP | `on` / `off` (Rohtext, kein JSON; kein Filter in der Firmware) |
+| `heatingpump/can_debug/state` | ESP → GUI | `on` / `off`, retained |
+| `heatingpump/can_debug/frames` | ESP → GUI | JSON-Array `[{"t":<ms seit Boot>,"id":"0x180","d":"<hex>","tx":false},...]`, ohne Feld `u` |
+
+- `mqtt_client.py` abonniert `frames` und `state` beim Connect. Frames werden wie `stiebel-debug/rx` verarbeitet (`_handle_frames`). Fehlt `u`, gilt `ts_src = "pc"` (ClockSync aus `t`, Abschnitt 11.2).
+- Signal `can_debug_state = Signal(bool)`: nur `"on"`/`"off"` werden emittiert, andere Werte ignoriert. `tab_live.py` setzt die Checkbox "Sniffer an" danach ohne Rücksendung.
+- `send_sniff(on, ids, types)`: fw `prod` → `heatingpump/can_debug/set`; `ids`/`types` entfallen. Fw `debug` oder unbekannt (vor dem ersten `status`) → `stiebel-debug/cmd/sniff` wie bisher.
+- Filter im Produktiv-Modus clientseitig: `tab_live.py` verwirft Frames, die nicht zu CAN-ID-Liste und Art passen, bevor sie in den Puffer gehen (`_frame_matches`). Begründung: die Firmware sendet ungefiltert, der Anzeigepuffer ist begrenzt. Frames vor einer Filteränderung fehlen dadurch nachträglich.
+- `stiebel-debug/status` (Produktiv) enthält nur `fw`, `rx`, `heap`, `ntp`, bei TWAI zusätzlich `twai_err`, `bus_off`, `rx_missed`, `rx_overrun`, `rx_queue`, `tec`, `rec`. Fehlende Felder (`tx`, `rx_fill`, `rx_cap`, `overflow`, ...) zeigt `tab_status.py` als `-`. Zahlenfelder mit null, Text, Liste oder inf gelten ebenfalls als fehlend; `bus_off` wird nur als Bool gewertet (null = `-`).
+- Debug-Firmware (`stiebel-debug/rx`, `cmd/read`, `cmd/scan`, ...) bleibt unverändert unterstützt.
 
 ### 8.6 Persistenz (Auto-Runner / Auswertung)
 - Tasks in `_state.json` bekommen optional `"switch":"0xfa"` (fehlt = `0xfa`). Rereads: optional `"switch"`. Neue optionale Liste `state["minmax"]`: `[{"member":"0x180","index":"0x0003","switch":"0xf8","raw":"0x0100","status":"ok"}]`.

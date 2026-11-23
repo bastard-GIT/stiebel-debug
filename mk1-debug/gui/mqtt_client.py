@@ -13,6 +13,9 @@ from PySide6.QtCore import QObject, Signal
 
 TOPIC_PREFIX = "stiebel-debug/"
 
+# Topic-Wurzel der Produktiv-Firmware. Alle Produktiv-Topics leiten sich davon ab.
+PROD_ROOT = "heatingpump"
+
 RX_TOPICS = (
     "rx",
     "read/result",
@@ -24,7 +27,12 @@ RX_TOPICS = (
 )
 
 # Verfuegbarkeit: Debug-Firmware (unter Praefix) und Produktiv-Firmware (eigenes Topic).
-PROD_AVAILABILITY_TOPIC = "heatingpump/status"
+PROD_AVAILABILITY_TOPIC = PROD_ROOT + "/status"
+# Sniffer der Produktiv-Firmware: Frames (JSON-Array wie stiebel-debug/rx, ohne Feld "u"),
+# Zustand (retained "on"/"off") und Schalter (Payload "on"/"off", kein JSON, kein Filter).
+PROD_CAN_DEBUG_FRAMES = PROD_ROOT + "/can_debug/frames"
+PROD_CAN_DEBUG_STATE = PROD_ROOT + "/can_debug/state"
+PROD_CAN_DEBUG_SET = PROD_ROOT + "/can_debug/set"
 AVAILABILITY_SOURCES = {
     "debug": TOPIC_PREFIX + "availability",
     "produktiv": PROD_AVAILABILITY_TOPIC,
@@ -132,6 +140,7 @@ class MqttBridge(QObject):
     availability = Signal(str)       # kombiniert: "offline" gewinnt, sonst "online"
     availability_source = Signal(str)  # "debug" oder "produktiv", unmittelbar vor availability
     firmware_kind = Signal(str)      # "debug" | "prod" | "unknown"; nur bei Aenderung
+    can_debug_state = Signal(bool)   # Produktiv-Sniffer an/aus (retained heatingpump/can_debug/state)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -191,7 +200,24 @@ class MqttBridge(QObject):
         except Exception:
             pass
 
+    def _publish_raw(self, topic: str, text: str) -> None:
+        client = self._client
+        if client is None:
+            return
+        try:
+            client.publish(topic, text, qos=0)
+        except Exception:
+            pass
+
     def send_sniff(self, on: bool, ids: list[int], types: list[int]) -> None:
+        """Produktiv-Firmware (fw "prod"): heatingpump/can_debug/set "on"/"off". ids/types entfallen,
+        der Filter wird clientseitig angewendet. Debug-Firmware: stiebel-debug/cmd/sniff.
+        Firmware-Art noch unbekannt (kein Status empfangen): an beide senden, die jeweils andere
+        Firmware ignoriert das fremde Topic."""
+        if self._fw in (FW_PROD, FW_UNKNOWN):
+            self._publish_raw(PROD_CAN_DEBUG_SET, "on" if on else "off")
+            if self._fw == FW_PROD:
+                return
         self._publish("cmd/sniff", {
             "on": bool(on),
             "ids": [_hex_id(i) for i in ids],
@@ -300,15 +326,59 @@ class MqttBridge(QObject):
                     client.subscribe(TOPIC_PREFIX + topic, qos=0)
                 except Exception:
                     pass
-            try:
-                client.subscribe(PROD_AVAILABILITY_TOPIC, qos=0)
-            except Exception:
-                pass
+            for topic in (PROD_AVAILABILITY_TOPIC, PROD_CAN_DEBUG_FRAMES, PROD_CAN_DEBUG_STATE):
+                try:
+                    client.subscribe(topic, qos=0)
+                except Exception:
+                    pass
         self.connected.emit(rc == 0)
 
     def _on_disconnect(self, client, userdata, rc):
         self._set_firmware_kind(FW_UNKNOWN)
         self.connected.emit(False)
+
+    def _handle_can_debug_state(self, text: str) -> None:
+        value = text.strip()
+        if value in ("on", "off"):
+            self.can_debug_state.emit(value == "on")
+
+    def _handle_frames(self, data) -> None:
+        """Frame-Batch (JSON-Array) aus stiebel-debug/rx oder heatingpump/can_debug/frames.
+
+        Fehlt "u" (Produktiv-Firmware), wird die Zeit aus t per ClockSync geschaetzt (ts_src "pc").
+        """
+        if not isinstance(data, list):
+            return
+        arrival = self._now()
+        pending = []  # (Item, Frame) ohne Zeitfelder
+        for item in data:
+            try:
+                pending.append((item, {
+                    "t": int(item["t"]),
+                    "id": _to_int(item["id"]),
+                    "data": bytes.fromhex(item["d"]),
+                    "tx": bool(item["tx"]),
+                }))
+            except Exception:
+                continue
+        # Fallback 'pc': nur Frames ohne ESP-Zeit speisen die Schaetzung.
+        pc_t = [frame["t"] for item, frame in pending if item.get("u") is None]
+        if pc_t:
+            self._clock.update(arrival, pc_t)
+        frames = []
+        for item, frame in pending:
+            try:
+                if item.get("u") is not None:
+                    frame["ts"] = round(float(item["u"]) / 1000, 3)
+                    frame["ts_src"] = "esp"
+                else:
+                    frame["ts"] = round(self._clock.estimate(frame["t"]), 3)
+                    frame["ts_src"] = "pc"
+            except Exception:
+                continue
+            frames.append(frame)
+        if frames:
+            self.rx_frames.emit(frames)
 
     def _on_message(self, client, userdata, msg):
         """Nachricht verarbeiten. Fehlerhafte Nachrichten werden ignoriert.
@@ -320,6 +390,12 @@ class MqttBridge(QObject):
             topic = msg.topic
             if topic == PROD_AVAILABILITY_TOPIC:
                 self._handle_availability("produktiv", msg.payload.decode("utf-8"))
+                return
+            if topic == PROD_CAN_DEBUG_STATE:
+                self._handle_can_debug_state(msg.payload.decode("utf-8"))
+                return
+            if topic == PROD_CAN_DEBUG_FRAMES:
+                self._handle_frames(json.loads(msg.payload.decode("utf-8")))
                 return
             if not topic.startswith(TOPIC_PREFIX):
                 return
@@ -334,38 +410,7 @@ class MqttBridge(QObject):
             data = json.loads(text)
 
             if suffix == "rx":
-                if not isinstance(data, list):
-                    return
-                arrival = self._now()
-                pending = []  # (Item, Frame) ohne Zeitfelder
-                for item in data:
-                    try:
-                        pending.append((item, {
-                            "t": int(item["t"]),
-                            "id": _to_int(item["id"]),
-                            "data": bytes.fromhex(item["d"]),
-                            "tx": bool(item["tx"]),
-                        }))
-                    except Exception:
-                        continue
-                # Fallback 'pc': nur Frames ohne ESP-Zeit speisen die Schaetzung.
-                pc_t = [frame["t"] for item, frame in pending if item.get("u") is None]
-                if pc_t:
-                    self._clock.update(arrival, pc_t)
-                frames = []
-                for item, frame in pending:
-                    try:
-                        if item.get("u") is not None:
-                            frame["ts"] = round(float(item["u"]) / 1000, 3)
-                            frame["ts_src"] = "esp"
-                        else:
-                            frame["ts"] = round(self._clock.estimate(frame["t"]), 3)
-                            frame["ts_src"] = "pc"
-                    except Exception:
-                        continue
-                    frames.append(frame)
-                if frames:
-                    self.rx_frames.emit(frames)
+                self._handle_frames(data)
 
             elif suffix == "read/result":
                 if not isinstance(data, dict):

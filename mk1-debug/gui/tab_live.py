@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from elster import ElsterDb, parse_frame, decode_value, switch_label
-from mqtt_client import MqttBridge
+from mqtt_client import FW_PROD, FW_UNKNOWN, MqttBridge
 
 MAX_ROWS = 50000
 FLUSH_MS = 100
@@ -319,6 +319,17 @@ class _FilterProxy(QSortFilterProxyModel):
         return True
 
 
+def _frame_matches(frame: dict, ids: list[int], msg_type) -> bool:
+    """Roh-Frame gegen CAN-ID-Liste (leer = alle) und Nachrichtenart (None = alle) pruefen."""
+    if ids and int(frame["id"]) not in ids:
+        return False
+    if msg_type is not None:
+        data = frame.get("data") or b""
+        if not data or (data[0] & 0x0F) != int(msg_type):
+            return False
+    return True
+
+
 def _parse_ids(text: str) -> tuple[list[int], str | None]:
     """'0x180, 0x500' -> ([0x180, 0x500], None). Bei Fehler ([], Fehlertext)."""
     ids: list[int] = []
@@ -342,6 +353,7 @@ class LiveTab(QWidget):
         self._pending: deque[dict] = deque()   # gesammelte Frames, noch nicht im Modell
         self._latest_dirty = False
         self._tick = 0
+        self._fw = FW_UNKNOWN  # Produktiv-Firmware sendet ungefiltert: Filter in der GUI
 
         self._model = FrameTableModel(db, self)
         self._proxy = _FilterProxy(self)
@@ -406,6 +418,8 @@ class LiveTab(QWidget):
 
         # --- Verbindungen ---
         self._bridge.rx_frames.connect(self._on_rx_frames)
+        self._bridge.firmware_kind.connect(self._on_firmware)
+        self._bridge.can_debug_state.connect(self._on_can_debug_state)
         self._pause_btn.clicked.connect(self._toggle_pause)
         self._clear_btn.clicked.connect(self._on_clear)
         self._sniff_btn.clicked.connect(self._send_filter)
@@ -446,7 +460,24 @@ class LiveTab(QWidget):
         self._status.setText(text)
 
     # --- Frames -------------------------------------------------------
+    def _on_firmware(self, kind: str) -> None:
+        self._fw = kind
+
+    def _on_can_debug_state(self, on: bool) -> None:
+        # Produktiv-Sniffer meldet seinen Zustand (retained): Checkbox nachziehen, ohne zu senden.
+        if self._fw != FW_PROD:
+            return
+        self._sniff_check.blockSignals(True)
+        self._sniff_check.setChecked(on)
+        self._sniff_check.blockSignals(False)
+        self._update_status("Produktiv-Sniffer " + ("an" if on else "aus"))
+
     def _on_rx_frames(self, frames: list) -> None:
+        # Produktiv-Firmware filtert nicht: nur Frames passend zu CAN-ID/Art behalten (Puffer ist begrenzt).
+        if self._fw == FW_PROD:
+            ids, _err = self._current_filters()
+            msg_type = self._type_combo.currentData()
+            frames = [f for f in frames if _frame_matches(f, ids, msg_type)]
         # Nur sammeln; eingefuegt wird im 100-ms-Takt in _flush().
         self._pending.extend(frames)
         while len(self._pending) > MAX_ROWS:
