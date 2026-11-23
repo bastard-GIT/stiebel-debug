@@ -6,13 +6,13 @@ Lizenz: GPL-3.0, siehe [LICENSE](LICENSE). Die Elster-Tabellen und -Logik gehen 
 
 ## 1. Paket fuer die Produktiv-Firmware
 
-Dateien: `stiebel_debug.yaml` und Ordner `stiebel_debug/` (`can_rx_stream.h`, `boot_info.h`, `crash_trace.h`, `ring_buffer.h`, `debug_json.h`, `unix_time.h`).
+Dateien: `stiebel_debug.yaml` und Ordner `stiebel_debug/` (`can_status.h`, `boot_info.h`, `crash_trace.h`, `unix_time.h`).
 
 Einbindung in die Firmware-YAML:
 
 ```yaml
 substitutions:
-  debug_can_stream: "true"   # CAN-RX/TX-Stream, Status, Sniff-Kommando
+  debug_can_status: "true"   # stiebel-debug/status (Frame-Zaehler, Heap, TWAI-Zaehler) und availability
   debug_boot_info: "true"    # Neustart-Infos stiebel_mk1_* in HA
 
 packages:
@@ -22,25 +22,28 @@ packages:
 Empfohlen ist ein fester Tag statt `@main`, damit der Build reproduzierbar bleibt.
 Beide Substitutionen sind standardmaessig `"true"`. `"false"` schaltet den Teil beim Kompilieren ab.
 
-Voraussetzung: Waermepumpen-Firmware ha-stiebel-control (Fork `bastard-GIT/ha-stiebel-control`, Branch `wpla07-modular`)
-mit canbus `id: my_can`, MQTT `id: mqtt_client`, SNTP-Zeit und dem TX-Hook `canTxObserver` in `can_io.h`.
-- RX: das Paket haengt per `!extend my_can` ein eigenes `on_frame` an. Kein Hook in der Firmware noetig.
-- TX: `can_rx_stream.h` setzt `canTxObserver` beim statischen Init (Muster wie `requestManagerExtraStep`, Upstream #79).
+**CAN-Mitschnitt:** Den Roh-Frame-Stream (RX und TX) bringt seit 2026-11-23 die Firmware selbst mit
+(`can_debug.h`, Upstream-PR #138, im Fork ab Branch `feat/extras-auslagern`):
+`<topic_root>/can_debug/set` mit `on`/`off`, Frames auf `<topic_root>/can_debug/frames` als JSON
+`[{"t":<ms>,"id":"0x180","d":"<hex>","tx":false},...]`. Der fruehere Stream dieses Pakets
+(`stiebel-debug/rx`, `stiebel-debug/cmd/sniff`) ist entfallen.
+
+Voraussetzung: Waermepumpen-Firmware ha-stiebel-control mit canbus `id: my_can` (TWAI oder MCP2515),
+MQTT `id: mqtt_client` und SNTP-Zeit.
+- Frame-Zaehler: das Paket haengt per `!extend my_can` ein eigenes `on_frame` an.
+- TWAI-Zaehler nur mit dem eingebauten TWAI-Controller; beim MCP2515 fehlen diese Felder.
 - Neustart-Infos: `boot_info.h` (bis 2026-11-23 im Fork). `crash_trace.h` ist eine Kopie aus esphome-lwz-180
   (gleicher Include-Guard, muss identisch bleiben).
 
 Das Paket bringt selbst mit: `canbus.on_frame` an `my_can`, `mqtt.on_connect` (availability online, retained),
-`mqtt.on_message` fuer `stiebel-debug/cmd/sniff`, `interval 50ms` (`dbgrx_flush()`), `interval 5s` (`dbgrx_publish_status()`),
-`interval 1s` (`bootinfo::loop()`).
+`interval 5s` (`dbgstat_publish()`), `interval 1s` (`bootinfo::loop()`).
 
-MQTT-Topics (Format: `mk1-debug/INTERFACES.md`):
+MQTT-Topics:
 
 | Topic | Inhalt |
 |---|---|
-| `stiebel-debug/rx` | Batch empfangener und gesendeter CAN-Frames (hoechstens alle 50 ms) |
-| `stiebel-debug/status` | Zaehler und Status alle 5 s. TWAI-Felder: `twai_err` (Busfehler gesamt), `bus_off`, `rx_missed` (TWAI-RX-Queue voll, Frame verworfen), `rx_overrun` (Hardware-FIFO uebergelaufen), `rx_queue` (wartende Frames), `tec`/`rec` (Fehlerzaehler) |
+| `stiebel-debug/status` | Status alle 5 s: `fw`, `rx` (Frames seit Start), `heap`, `ntp`; mit TWAI zusaetzlich `twai_err`, `bus_off`, `rx_missed`, `rx_overrun`, `rx_queue`, `tec`, `rec` |
 | `stiebel-debug/availability` | `online`, retained |
-| `stiebel-debug/cmd/sniff` | Kommando, z.B. `{"on":true,"ids":["0x180"],"types":[2]}`. Sniffer ist standardmaessig AUS |
 | `<topic_root>/calculated/stiebel_mk1_*/state` | Neustart-Infos (Letzter Neustart, Neustart Grund mit Attributen, Laufzeit vor Neustart, Neustarts, Firmware Version, Firmware Build), retained, HA-Discovery am Geraet Waermepumpe |
 
 Das Paket ist nicht allein baubar: es braucht die Waermepumpen-Firmware (Hooks, `mqtt`, TWAI).
