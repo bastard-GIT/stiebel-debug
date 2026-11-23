@@ -6,32 +6,42 @@ Lizenz: GPL-3.0, siehe [LICENSE](LICENSE). Die Elster-Tabellen und -Logik gehen 
 
 ## 1. Paket fuer die Produktiv-Firmware
 
-Dateien: `stiebel_debug.yaml` und Ordner `stiebel_debug/` (`can_rx_stream.h`, `ring_buffer.h`, `debug_json.h`, `unix_time.h`).
+Dateien: `stiebel_debug.yaml` und Ordner `stiebel_debug/` (`can_rx_stream.h`, `boot_info.h`, `crash_trace.h`, `ring_buffer.h`, `debug_json.h`, `unix_time.h`).
 
 Einbindung in die Firmware-YAML:
 
 ```yaml
+substitutions:
+  debug_can_stream: "true"   # CAN-RX/TX-Stream, Status, Sniff-Kommando
+  debug_boot_info: "true"    # Neustart-Infos stiebel_mk1_* in HA
+
 packages:
-  stiebel_debug: github://bastard-GIT/stiebel-debug/stiebel_debug.yaml@mk1-2026.11.19
+  stiebel_debug: github://bastard-GIT/stiebel-debug/stiebel_debug.yaml@<tag>
 ```
 
 Empfohlen ist ein fester Tag statt `@main`, damit der Build reproduzierbar bleibt.
+Beide Substitutionen sind standardmaessig `"true"`. `"false"` schaltet den Teil beim Kompilieren ab.
 
-Voraussetzung: Waermepumpen-Firmware mit den Hook-Makros `STIEBEL_DEBUG_RX(id, x)` und `STIEBEL_DEBUG_TX(id, x)`
-(Fork `bastard-GIT/ha-stiebel-control`, Branch `wpla07-modular`). Das Paket setzt `-DSTIEBEL_DEBUG`, bindet `stiebel_debug/`
-ein und nutzt `::esphome::mqtt::global_mqtt_client` (keine feste MQTT-id noetig). Ohne das Paket sind die Makros leer.
+Voraussetzung: Waermepumpen-Firmware ha-stiebel-control (Fork `bastard-GIT/ha-stiebel-control`, Branch `wpla07-modular`)
+mit canbus `id: my_can`, MQTT `id: mqtt_client`, SNTP-Zeit und dem TX-Hook `canTxObserver` in `can_io.h`.
+- RX: das Paket haengt per `!extend my_can` ein eigenes `on_frame` an. Kein Hook in der Firmware noetig.
+- TX: `can_rx_stream.h` setzt `canTxObserver` beim statischen Init (Muster wie `requestManagerExtraStep`, Upstream #79).
+- Neustart-Infos: `boot_info.h` (bis 2026-11-23 im Fork). `crash_trace.h` ist eine Kopie aus esphome-lwz-180
+  (gleicher Include-Guard, muss identisch bleiben).
 
-Das Paket bringt selbst mit: `mqtt.on_connect` (availability online, retained), `mqtt.on_message` fuer
-`stiebel-debug/cmd/sniff`, `interval 50ms` (`dbgrx_flush()`), `interval 5s` (`dbgrx_publish_status()`).
+Das Paket bringt selbst mit: `canbus.on_frame` an `my_can`, `mqtt.on_connect` (availability online, retained),
+`mqtt.on_message` fuer `stiebel-debug/cmd/sniff`, `interval 50ms` (`dbgrx_flush()`), `interval 5s` (`dbgrx_publish_status()`),
+`interval 1s` (`bootinfo::loop()`).
 
 MQTT-Topics (Format: `mk1-debug/INTERFACES.md`):
 
 | Topic | Inhalt |
 |---|---|
-| `stiebel-debug/rx` | Batch empfangener CAN-Frames (hoechstens alle 50 ms) |
+| `stiebel-debug/rx` | Batch empfangener und gesendeter CAN-Frames (hoechstens alle 50 ms) |
 | `stiebel-debug/status` | Zaehler und Status alle 5 s. TWAI-Felder: `twai_err` (Busfehler gesamt), `bus_off`, `rx_missed` (TWAI-RX-Queue voll, Frame verworfen), `rx_overrun` (Hardware-FIFO uebergelaufen), `rx_queue` (wartende Frames), `tec`/`rec` (Fehlerzaehler) |
 | `stiebel-debug/availability` | `online`, retained |
 | `stiebel-debug/cmd/sniff` | Kommando, z.B. `{"on":true,"ids":["0x180"],"types":[2]}`. Sniffer ist standardmaessig AUS |
+| `<topic_root>/calculated/stiebel_mk1_*/state` | Neustart-Infos (Letzter Neustart, Neustart Grund mit Attributen, Laufzeit vor Neustart, Neustarts, Firmware Version, Firmware Build), retained, HA-Discovery am Geraet Waermepumpe |
 
 Das Paket ist nicht allein baubar: es braucht die Waermepumpen-Firmware (Hooks, `mqtt`, TWAI).
 

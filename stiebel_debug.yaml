@@ -1,49 +1,87 @@
-# stiebel_debug.yaml - Debug-Paket fuer die Waermepumpen-Firmware (CAN-RX-Stream, Sniffer).
+# stiebel_debug.yaml - Debug-Paket fuer die Waermepumpen-Firmware (CAN-Stream, Neustart-Infos).
 #
-# Zweck: Frames des Elster-CAN-Busses mitschneiden und per MQTT ausgeben. Nur Lesepfad, der
-# Sniffer ist standardmaessig AUS und wird ueber stiebel-debug/cmd/sniff eingeschaltet.
+# Zweck: Frames des Elster-CAN-Busses mitschneiden und per MQTT ausgeben, Neustart-Infos des ESP als
+# HA-Diagnose-Entitaeten melden. Nur Lesepfad, der Sniffer ist standardmaessig AUS und wird ueber
+# stiebel-debug/cmd/sniff eingeschaltet.
 #
 # Einbindung in die Firmware-YAML:
 #   packages:
-#     stiebel_debug: github://bastard-GIT/stiebel-debug/stiebel_debug.yaml@main
+#     stiebel_debug: github://bastard-GIT/stiebel-debug/stiebel_debug.yaml@<tag>
+#
+# Substitutionen (Standardwerte unten, in der eigenen YAML ueberschreiben):
+#   debug_can_stream   "true"/"false": CAN-RX/TX-Stream, Status und Sniff-Kommando (stiebel-debug/*)
+#   debug_boot_info    "true"/"false": Neustart-Infos stiebel_mk1_* (Letzter Neustart, Neustart Grund,
+#                      Laufzeit vor Neustart, Neustarts, Firmware Version, Firmware Build)
 #
 # Voraussetzungen:
-#   - Waermepumpen-Firmware mit den Hook-Makros STIEBEL_DEBUG_RX / STIEBEL_DEBUG_TX
-#     (Fork bastard-GIT/ha-stiebel-control, Branch wpla07). Ohne -DSTIEBEL_DEBUG sind die Makros leer.
-#   - Komponenten mqtt (wird ueber ::esphome::mqtt::global_mqtt_client genutzt, keine feste id noetig),
-#     interval und esp-idf mit TWAI.
+#   - Waermepumpen-Firmware ha-stiebel-control mit canbus id my_can und dem TX-Hook canTxObserver
+#     in can_io.h (Fork bastard-GIT/ha-stiebel-control, Branch wpla07-modular). RX braucht keinen Hook:
+#     dieses Paket haengt ein eigenes on_frame an my_can.
+#   - Komponenten mqtt (id mqtt_client fuer boot_info.h; der Stream nutzt ::esphome::mqtt::global_mqtt_client),
+#     interval, time (SNTP, kommt aus common.yaml) und esp-idf mit TWAI.
 #
 # MQTT-Topics (Format siehe mk1-debug/INTERFACES.md):
-#   stiebel-debug/rx            Batch empfangener Frames (hoechstens alle 50 ms)
+#   stiebel-debug/rx            Batch empfangener und gesendeter Frames (hoechstens alle 50 ms)
 #   stiebel-debug/status        Zaehler/Status alle 5 s (inkl. TWAI rx_missed, rx_overrun, rx_queue, tec, rec)
 #   stiebel-debug/availability  online (retained), wird alle 5 s und bei MQTT-Connect erneuert
 #   stiebel-debug/cmd/sniff     Kommando: {"on":true,"ids":["0x180"],"types":[2]}, leere Listen = alles
+#   <topic_root>/calculated/stiebel_mk1_*/state   Neustart-Infos (retained), Discovery unter homeassistant/sensor/
+
+substitutions:
+  debug_can_stream: "true"
+  debug_boot_info: "true"
 
 esphome:
   includes:
     - stiebel_debug
   build_flags:
-    - "-DSTIEBEL_DEBUG"
+    - "-DSTIEBEL_DEBUG_CAN_${debug_can_stream}"
+    - "-DSTIEBEL_DEBUG_BOOTINFO_${debug_boot_info}"
+
+# RX: zusaetzliches on_frame an der canbus-Komponente my_can (!extend haengt die Liste an, ersetzt sie nicht).
+canbus:
+  - id: !extend my_can
+    on_frame:
+      - can_id: 0
+        can_id_mask: 0
+        then:
+          - lambda: |-
+              #ifdef STIEBEL_DEBUG_CAN_true
+              dbgrx_on_frame(can_id, x);
+              #endif
 
 mqtt:
   on_connect:
     - lambda: |-
+        #ifdef STIEBEL_DEBUG_CAN_true
         if (::esphome::mqtt::global_mqtt_client != nullptr)
           ::esphome::mqtt::global_mqtt_client->publish("stiebel-debug/availability", "online", 6, 1, true);
+        #endif
   on_message:
     - topic: stiebel-debug/cmd/sniff
       then:
         - lambda: |-
+            #ifdef STIEBEL_DEBUG_CAN_true
             dbgrx_on_command("sniff", x);
+            #endif
 
 interval:
   # rx-Batch aus dem Ringpuffer (hoechstens alle 50 ms)
   - interval: 50ms
     then:
       - lambda: |-
+          #ifdef STIEBEL_DEBUG_CAN_true
           dbgrx_flush();
+          #endif
   # Status auf stiebel-debug/status
   - interval: 5s
     then:
       - lambda: |-
+          #ifdef STIEBEL_DEBUG_CAN_true
           dbgrx_publish_status();
+          #endif
+  # Neustart-Infos einmal pro Start an HA; haelt crash_trace up_ms aktuell (boot_info.h)
+  - interval: 1s
+    then:
+      - lambda: |-
+          bootinfo::loop();

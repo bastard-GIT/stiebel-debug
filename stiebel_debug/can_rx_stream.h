@@ -70,7 +70,7 @@ static void mqtt_publish(const char *topic, const char *payload, size_t len) {
 
 }  // namespace mkdbg
 
-// ---------- Globale Schnittstelle (aufgerufen aus YAML und ha-stiebel-control.h) ----------
+// ---------- Globale Schnittstelle (aufgerufen aus YAML und ueber canTxObserver aus can_io.h) ----------
 
 // Empfangener Frame aus on_frame. rx_count immer, Ring nur bei aktivem Sniffer und passendem Filter.
 void dbgrx_on_frame(uint32_t can_id, const std::vector<uint8_t> &x) {
@@ -111,6 +111,16 @@ void dbgrx_note_tx(uint32_t can_id, const std::vector<uint8_t> &data) {
   f.tx = true;
   mkdbg::rx_ring.push(f);
 }
+
+// TX-Pfad: canTxObserver (can_io.h der Waermepumpen-Firmware) beim statischen Init setzen, wie
+// requestManagerExtraStep (#79). canTxObserver ist null-initialisiert und liegt in derselben
+// Uebersetzungseinheit, also vor diesem dynamischen Init gesetzt. RX laeuft ueber on_frame in stiebel_debug.yaml.
+#ifdef STIEBEL_DEBUG_CAN_true
+[[maybe_unused]] static const bool dbgrx_tx_observer_installed = [] {
+  canTxObserver = dbgrx_note_tx;
+  return true;
+}();
+#endif
 
 // Ring leeren in hoechstens einem Batch pro kRxIntervalMs. Ohne MQTT-Verbindung bleibt der Ring unangetastet.
 void dbgrx_flush() {
