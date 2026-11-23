@@ -703,7 +703,8 @@ def test_status_tab_counts_fps_and_bus_off(qapp, monkeypatch):
     monkeypatch.setattr(tab_status, "_now", lambda: next(clock))
     fake.status.emit({"rx": 10, "tx": 1, "rx_fill": 5, "rx_cap": 10, "overflow": 0,
                       "twai_err": 0, "bus_off": True, "heap": 7})
-    fake.status.emit({"rx": 30})
+    fake.status.emit({"rx": 30, "tx": 1, "rx_fill": 5, "rx_cap": 10, "overflow": 0,
+                      "twai_err": 0, "bus_off": True, "heap": 7})
     assert tab._lbl_fps.text() == "10.0"
     assert tab._lbl_rx_fill.text() == "5 / 10"
     assert tab._lbl_bus_off.text() == "JA"

@@ -39,6 +39,7 @@ class FakeBridge(QObject):
     availability = Signal(str)
     availability_source = Signal(str)
     firmware_kind = Signal(str)
+    can_debug_state = Signal(bool)
 
     def __init__(self):
         super().__init__()
