@@ -341,6 +341,7 @@ static void write_start_readback(uint32_t now) {
   req_member = write_cmd.member;
   req_index = write_cmd.index;
   req_switch = 0xFA;
+  req_src = (uint16_t)kOwnCanId;  // Readback sendet von 0x680, Antwort daher an 0x680 (nicht an src des letzten Reads)
   req_sent_ms = now;
   req_timeout_ms = kTimeoutMs;
 }

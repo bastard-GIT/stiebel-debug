@@ -8,7 +8,7 @@ Diese Datei enthält keine Zugangsdaten. Passwörter und Schlüssel stehen aussc
 
 Das Werkzeug besteht aus zwei Teilen:
 
-1. **Debug-Firmware** (ESPHome, esp-idf) auf dem Mk1-ESP32-S3. Sie liest den CAN-Bus mit, sendet gezielte Lese-Requests und führt Index-Scans durch. Sie dekodiert nicht und kann nicht schreiben. Die Ergebnisse gehen per MQTT (Präfix `stiebel-debug/`).
+1. **Debug-Firmware** (ESPHome, esp-idf) auf dem Mk1-ESP32-S3. Sie liest den CAN-Bus mit, sendet gezielte Lese-Requests, führt Index-Scans und Member-Probes durch. Sie dekodiert nicht. Schreiben ist nur über `cmd/write` möglich, mit Rücklesen und Sicherheitsprüfungen. Die Ergebnisse gehen per MQTT (Präfix `stiebel-debug/`).
 2. **PySide6-GUI** auf dem PC. Sie steuert die Firmware per MQTT, dekodiert Frames anhand von `ElsterTable.json` und exportiert Mitschnitte.
 
 Funktionen:
@@ -16,6 +16,8 @@ Funktionen:
 - CAN-Bus mitlesen (Rohframes, dekodiert in der GUI)
 - Einzelne Elster-Signale gezielt abfragen
 - Index-Scanner über einen Indexbereich eines CAN-Members
+- Member-Probe: einen Index bei allen CAN-IDs abfragen
+- Schreiben mit Rücklesen (`cmd/write`, nur Debug-Firmware)
 
 ## Ordnerstruktur
 
@@ -131,15 +133,23 @@ Präfix: `stiebel-debug/`
 | Topic | Richtung | Inhalt |
 |---|---|---|
 | `cmd/sniff` | GUI → ESP | `{"on":true,"ids":["0x180"],"types":[2]}` – leere Listen = alles |
-| `cmd/read` | GUI → ESP | `{"member":"0x180","index":"0x4ef0"}` |
+| `cmd/read` | GUI → ESP | `{"member":"0x180","index":"0x4ef0"}`, optional `format`, `switch`, `src`, `timeout_ms` |
 | `cmd/scan` | GUI → ESP | `{"member":"0x500","from":"0x4e00","to":"0x4fff","delay_ms":200}` |
-| `cmd/stop` | GUI → ESP | `{}` – Scan abbrechen |
+| `cmd/probe` | GUI → ESP | `{"index":"0x000b","from_id":"0x000","to_id":"0x7ff","delay_ms":100}` – Index bei allen CAN-IDs |
+| `cmd/write` | GUI → ESP | `{"member":"0x201","index":"0x0013","value":"0x0208","format":"auto"}` – schreibt, nur Debug-Firmware |
+| `cmd/stop` | GUI → ESP | `{}` – bricht Scan, Probe, Read und Write ab |
+| `cmd/sniff` | GUI → ESP | `{"on":true,"ids":["0x180"],"types":[2]}` – leere Listen = alles |
 | `rx` | ESP → GUI | Batch aus Frames: `[{"t":123456,"id":"0x180","d":"d200fa01120200","tx":false}]` |
-| `read/result` | ESP → GUI | `{"member":"0x180","index":"0x4ef0","raw":"0x03e8","status":"ok"}` |
-| `scan/progress` | ESP → GUI | `{"index":"0x4e40","done":64,"total":512}` |
-| `scan/result` | ESP → GUI | `{"member":"0x500","items":[{"index":"0x4e40","raw":"0x0123","status":"ok"}]}` |
-| `status` | ESP → GUI | `{"rx":0,"tx":0,"rx_fill":0,"rx_cap":4096,"overflow":0,"twai_err":0,"bus_off":false,"heap":0}` |
+| `read/result` | ESP → GUI | `{"member":"0x180","index":"0x4ef0","switch":"0xfa","raw":"0x03e8","status":"ok"}` |
+| `write/result` | ESP → GUI | `{"member":"0x201","index":"0x0013","value":"0x0208","status":"verified","ack":4,"readback":"0x0208"}` |
+| `scan/progress` | ESP → GUI | `{"member":"0x500","format":"auto","index":"0x4e40","switch":"0xfa","done":64,"total":512,"state":"running"}` |
+| `scan/result` | ESP → GUI | `{"member":"0x500","format":"auto","switch":"0xfa","items":[{"index":"0x4e40","raw":"0x0123","status":"ok"}]}` |
+| `probe/progress` | ESP → GUI | `{"index":"0x000b","id":"0x1a0","done":416,"total":2047,"state":"running"}` |
+| `probe/result` | ESP → GUI | `{"index":"0x000b","items":[{"id":"0x180","raw":"0x8000","status":"unsupported"}]}` |
+| `status` | ESP → GUI | `{"fw":"debug","rx":0,"tx":0,"rx_fill":0,"rx_cap":4096,"overflow":0,"twai_err":0,"bus_off":false,"heap":0,"ntp":false}` |
 | `availability` | ESP → GUI | `online` / `offline` (retained, Last Will) |
+
+Details zu Feldern, Status-Werten und Regeln: `INTERFACES.md`, Abschnitte 1, 7.2, 8.3, 10 und 12.
 
 ### Produktiv-Firmware
 
@@ -151,14 +161,18 @@ Topic-Wurzel `heatingpump/` (Konstante `PROD_ROOT` in `gui/mqtt_client.py`). Die
 | `heatingpump/can_debug/set` | GUI → ESP | `on` / `off` – Sniffer an/aus, kein Filter |
 | `heatingpump/can_debug/state` | ESP → GUI | `on` / `off` (retained) – Zustand des Sniffers |
 | `heatingpump/can_debug/frames` | ESP → GUI | Batch wie `rx`, aber ohne `u`: `[{"t":123456,"id":"0x180","d":"d200fa01120200","tx":false}]` |
+| `heatingpump/scan/start` | GUI → ESP | `MEMBER` oder `MEMBER 0xLO 0xHI` – Bus-Scan eines Members |
+| `heatingpump/scan/stop` | GUI → ESP | beliebig – Scan abbrechen |
+| `heatingpump/scan/status` | ESP → GUI | `{"state":"running|done|stopped","member":"…","done":…,"total":…,"hits":…,"seconds":…}` |
+| `heatingpump/scan/<MEMBER>/0x<idx>` | ESP → GUI | `{"name":"…","raw":…,"value":"…"}` (retained), nur Indizes mit Antwort |
 
-Im Produktiv-Modus gilt der Filter (CAN-ID, Art) nur in der GUI. Die Zeitstempel stammen aus der Schätzung über `t` (`ts_src` = `pc`). Details: `INTERFACES.md`, Abschnitt 8.7.
+Im Produktiv-Modus gilt der Filter (CAN-ID, Art) nur in der GUI. Die Zeitstempel stammen aus der Schätzung über `t` (`ts_src` = `pc`). Der Sniffer ist nur aktiv, wenn die Firmware mit `can_debug: "true"` gebaut wurde (Mk1: ja). Die `cmd/*`-Kommandos gibt es in der Produktiv-Firmware noch nicht; das ist geplant. Die GUI nutzt die Produktiv-Topics für Scan und `cmd/*` noch nicht. Details: `INTERFACES.md`, Abschnitte 8.7 und 13.
 
 Status-Werte in `read/result` und `scan/result`: `ok`, `unsupported` (Rohwert `0x8000`), `timeout`.
 
 ## Sicherheitshinweise
 
-- **Nur Lese-Requests.** Die Firmware hat keine Schreibfunktion. Es werden keine Werte an die Wärmepumpe geschrieben.
+- **Schreiben nur gezielt.** `cmd/write` gibt es nur in der Debug-Firmware. Die Firmware schreibt nur im Leerlauf, nur an Ziele 0x000–0x7FF außer 0x680, und Index 0xF7–0xFA mit Wert 0x8000 wird nicht gesendet. Das Ergebnis steht in `write/result` (`verified`, `mismatch`, `no_ack`, `timeout`, `rejected`). Ablauf und Regeln: `INTERFACES.md`, Abschnitt 10.
 - **Mindestabstand 100 ms** zwischen zwei gesendeten Requests. Ein `delay_ms` unter 100 wird auf 100 angehoben.
 - **`secrets.yaml` nie committen.** Die Datei enthält MQTT-Zugang und API-Schlüssel.
 - **Keine Zugangsdaten im README** oder in anderen Dokumenten dieses Ordners.

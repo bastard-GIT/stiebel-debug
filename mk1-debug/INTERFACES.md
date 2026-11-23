@@ -6,17 +6,24 @@ Python: `C:\temp\stiebel-Remote\.venv\Scripts\python.exe` (immer mit `-I` starte
 
 ## 1. MQTT-Topics (Präfix `stiebel-debug/`)
 
+Diese Tabelle gilt für die Debug-Firmware (Präfix `stiebel-debug/`). Die Produktiv-Firmware hat andere Topics, siehe Abschnitt 13.
+
 | Topic | Richtung | Payload (JSON) |
 |---|---|---|
 | `cmd/sniff` | GUI→ESP | `{"on":true,"ids":["0x180"],"types":[2]}` – leere Listen = alles |
-| `cmd/read` | GUI→ESP | `{"member":"0x180","index":"0x4ef0"}` |
-| `cmd/scan` | GUI→ESP | `{"member":"0x500","from":"0x4e00","to":"0x4fff","delay_ms":200}` |
-| `cmd/stop` | GUI→ESP | `{}` |
-| `rx` | ESP→GUI | `[{"t":123456,"id":"0x180","d":"d200fa01120200","tx":false}]` |
-| `read/result` | ESP→GUI | `{"member":"0x180","index":"0x4ef0","raw":"0x03e8","status":"ok"}` |
-| `scan/progress` | ESP→GUI | `{"index":"0x4e40","done":64,"total":512}` |
-| `scan/result` | ESP→GUI | `{"member":"0x500","items":[{"index":"0x4e40","raw":"0x0123","status":"ok"}]}` |
-| `status` | ESP→GUI | `{"rx":0,"tx":0,"rx_fill":0,"rx_cap":4096,"overflow":0,"twai_err":0,"bus_off":false,"heap":0}` |
+| `cmd/read` | GUI→ESP | `{"member":"0x180","index":"0x4ef0"}`, optional `format`, `switch`, `src`, `timeout_ms` (Abschnitte 7.2, 8.3, 12) |
+| `cmd/write` | GUI→ESP | `{"member":"0x201","index":"0x0013","value":"0x0208","format":"auto"}` – nur Debug-Firmware (Abschnitt 10) |
+| `cmd/scan` | GUI→ESP | `{"member":"0x500","from":"0x4e00","to":"0x4fff","delay_ms":200}`, optional `format`, `switch` |
+| `cmd/probe` | GUI→ESP | `{"index":"0x000b","from_id":"0x000","to_id":"0x7ff","delay_ms":100}` (Abschnitt 7.2) |
+| `cmd/stop` | GUI→ESP | `{}` – bricht Scan, Probe, Read und Write ab |
+| `rx` | ESP→GUI | `[{"t":123456,"id":"0x180","d":"d200fa01120200","tx":false}]`, optional `"u"` (Unix-ms, Abschnitt 11) |
+| `read/result` | ESP→GUI | `{"member":"0x180","index":"0x4ef0","switch":"0xfa","raw":"0x03e8","status":"ok"}`, bei `src` ≠ 0x680 zusätzlich `"src"` |
+| `write/result` | ESP→GUI | `{"member":"0x201","index":"0x0013","value":"0x0208","status":"verified","ack":4,"readback":"0x0208"}` (Abschnitt 10.5) |
+| `scan/progress` | ESP→GUI | `{"member":"0x500","format":"auto","index":"0x4e40","switch":"0xfa","done":64,"total":512,"state":"running"}` |
+| `scan/result` | ESP→GUI | `{"member":"0x500","format":"auto","switch":"0xfa","items":[{"index":"0x4e40","raw":"0x0123","status":"ok"}]}` |
+| `probe/progress` | ESP→GUI | `{"index":"0x000b","id":"0x1a0","done":416,"total":2047,"state":"running"}` |
+| `probe/result` | ESP→GUI | `{"index":"0x000b","items":[{"id":"0x180","raw":"0x8000","status":"unsupported"}]}` |
+| `status` | ESP→GUI | `{"fw":"debug","rx":0,"tx":0,"rx_fill":0,"rx_cap":4096,"overflow":0,"twai_err":0,"bus_off":false,"heap":0,"ntp":false}` |
 | `availability` | ESP→GUI | `online` / `offline` (retained, LWT) |
 
 Regeln:
@@ -88,14 +95,14 @@ size_t format_status(uint32_t rx, uint32_t tx, size_t rx_fill, size_t rx_cap, ui
 Bindet 3.1–3.3 und ESPHome ein. Stellt bereit (global, aufrufbar aus YAML-Lambdas):
 ```cpp
 void dbg_on_frame(uint32_t can_id, const std::vector<uint8_t> &x);   // aus canbus on_frame
-void dbg_on_command(const std::string &topic_suffix, const std::string &payload);  // sniff|read|scan|stop
+void dbg_on_command(const std::string &topic_suffix, const std::string &payload);  // sniff|read|write|scan|probe|stop
 void dbg_loop();                                                      // aus interval: 20ms – RX-Ringpuffer leeren, Batch publizieren, Scanner/Read-State-Machine, TX-Takt
 void dbg_publish_status();                                            // aus interval: 5s
 ```
 MQTT-Veröffentlichung über `id(mqtt_client).publish(topic, payload, len, qos, retain)`.
 
 ## 4. YAML (Welle 1: Gerüst)
-- `mk1-debug.yaml`: Substitutions wie Mk1 (`can_tx_pin: GPIO18`, `can_rx_pin: GPIO16`, `can_id_pc: "0x680"`, `can_bitrate: 50kbps`, Ethernet-Pins GPIO13/11/12/14/10/9), Gerätename `mk1-debug`, Pakete `firmware/board_esp32s3_espidf.yaml`, `firmware/network_ethernet_w5500.yaml`, `firmware/can_debug.yaml`. `api:` mit `encryption: key: !secret debug_api_key`, `ota: platform: esphome`, `mqtt:` mit `broker/port/username/password` aus `!secret mqtt_server|mqtt_port|mqtt_username|mqtt_password`, `id: mqtt_client`, `discovery: false`, `topic_prefix: stiebel-debug`, Birth/Will auf `stiebel-debug/availability` (`online`/`offline`, retained), `on_message` für `stiebel-debug/cmd/sniff|read|scan|stop`, die `dbg_on_command` aufrufen. `includes:` die Header aus Abschnitt 3.
+- `mk1-debug.yaml`: Substitutions wie Mk1 (`can_tx_pin: GPIO18`, `can_rx_pin: GPIO16`, `can_id_pc: "0x680"`, `can_bitrate: 50kbps`, Ethernet-Pins GPIO13/11/12/14/10/9), Gerätename `mk1-debug`, Pakete `firmware/board_esp32s3_espidf.yaml`, `firmware/network_ethernet_w5500.yaml`, `firmware/can_debug.yaml`. `api:` mit `encryption: key: !secret debug_api_key`, `ota: platform: esphome`, `mqtt:` mit `broker/port/username/password` aus `!secret mqtt_server|mqtt_port|mqtt_username|mqtt_password`, `id: mqtt_client`, `discovery: false`, `topic_prefix: stiebel-debug`, Birth/Will auf `stiebel-debug/availability` (`online`/`offline`, retained), `on_message` für `stiebel-debug/cmd/sniff|read|write|scan|probe|stop` (mk1-debug.yaml), die `dbg_on_command(<Suffix>, x)` aufrufen. Unbekannte Suffixe loggen nur eine Warnung. `includes:` die Header aus Abschnitt 3.
 - `firmware/can_debug.yaml`: `canbus: esp32_can`, `id: my_can`, Pins/ID/Bitrate aus Substitutions, `use_extended_id: false`, `rx_queue_len: 512`, `tx_queue_len: 64`, `on_frame` mit `can_id: 0`, `can_id_mask: 0` → `dbg_on_frame(can_id, x);`; `interval:` 20 ms → `dbg_loop();` und 5 s → `dbg_publish_status();`.
 
 ## 5. Python-Module der GUI (alle in `gui/`)
@@ -237,7 +244,7 @@ CLI: `python -I auto_runner.py --out <dir> [--secrets ../secrets.yaml] [--delay 
 
 ### 8.5 Produktiv-Firmware (`esp32-s3-technik-mk1/ha-stiebel-control/`)
 - Neuer Header `can_rx_stream.h` (+ Kopien `ring_buffer.h`, `debug_json.h` aus `mk1-debug/firmware/`), `namespace mkdbg`, Funktionen: `void dbgrx_on_frame(uint32_t can_id, const std::vector<uint8_t>&)`, `void dbgrx_note_tx(uint32_t can_id, const std::vector<uint8_t>&)`, `void dbgrx_on_command(const std::string& suffix, const std::string& payload)` (nur `"sniff"`), `void dbgrx_flush()`, `void dbgrx_publish_status()`.
-- Topics: `stiebel-debug/status`, `heatingpump/status` (Availability, `online`/`offline`). Der Sniffer-Stream läuft über `heatingpump/can_debug/*` (siehe 8.7), nicht mehr über `stiebel-debug/rx`/`cmd/sniff`. Keine Kommandos read/scan/probe/stop.
+- Topics: `stiebel-debug/status`, `heatingpump/status` (Availability, `online`/`offline`). Der Sniffer-Stream läuft über `heatingpump/can_debug/*` (siehe 8.7), nicht mehr über `stiebel-debug/rx`/`cmd/sniff`. Keine Kommandos read/scan/probe/stop. Dieser Stand ist älter; aktuell siehe Abschnitt 13.
 
 ### 8.7 Produktiv-Sniffer `heatingpump/can_debug/*` (GUI-Seite, 2026-11-23)
 Die Produktiv-Firmware hat `stiebel-debug/rx` und `stiebel-debug/cmd/sniff` nicht mehr. Stattdessen (Topic-Wurzel `PROD_ROOT = "heatingpump"` in `mqtt_client.py`, alle Produktiv-Topics daraus abgeleitet):
@@ -360,3 +367,48 @@ Art 0 (`d0 & 0x0F == 0`), Absender 0x680, DLC 7. `d0 = ((id >> 3) & 0xF0) | 0x00
 - `cmd/read` optional `"timeout_ms"`: 100–10000 (Standard 1000, unter 100 wird 100). FES (0x100) antwortet erst nach 0,5–1,5 s, mit Rückstau bis ~4 s (gemessen 2026-11-02).
 - Vorsicht: Eine ID, die selbst auf dem Bus sendet, als `src` zu nutzen, kann Kollisionen (Error-Frames) auslösen. Antworten gehen dann an das echte Gerät.
 - Testwerkzeug: `tools/fes_src_test.py` (FES 0x100 mit wechselnden Absendern; aktive IDs nur mit `--spoof`).
+
+## 13. Produktiv-Modus (Topic-Wurzel `heatingpump/`)
+
+Gilt für die Produktiv-Firmware (`esp32-s3-technik-mk1`). Die Topic-Wurzel steht in `PROD_ROOT` in `gui/mqtt_client.py`. Quellen: Fork `bastard-GIT/ha-stiebel-control`, Branch `wpla07-modular` (`esphome/ha-stiebel-control/bus_scan.h`, `can_debug.h`, `can_members.h`) und `upstream/main` (`bus_scan.h` identisch, `docs/CONFIGURATION.md`, Abschnitt Bus scan). Stand 2026-11-23.
+
+### 13.1 Bus-Scan (vorhanden)
+
+Fragt einen Member nach allen Indizes der Tabelle ab (ca. 3 760 Indizes, ca. 9,5 min bei 150 ms) oder nach einem Bereich.
+
+| Topic | Richtung | Payload |
+|---|---|---|
+| `heatingpump/scan/start` | GUI/HA → ESP | `MEMBER` (alle Tabellenindizes) oder `MEMBER 0xLO 0xHI` (Bereich) |
+| `heatingpump/scan/stop` | GUI/HA → ESP | beliebig |
+| `heatingpump/scan/status` | ESP → | `{"state":"running|done|stopped","member":"…","done":…,"total":…,"hits":…,"seconds":…}` (retained) |
+| `heatingpump/scan/<MEMBER>/0x<idx>` | ESP → | `{"name":"…","raw":…,"value":"…"}` (retained) |
+
+Regeln:
+- `MEMBER` ist ein Name aus `CanMembers` (`can_members.h`), Groß-/Kleinschreibung egal. Beispiele: MANAGER, KESSEL, HEIZMODUL, WPUMPE, SPEICHER, FES, OTHER. `PC` wird abgelehnt. Im WPL-A-Build (`HA_CONTROLLER_WPLA`) heißen 0x514 `WPUMPE` und 0x201 `SPEICHER`, sonst `HEIZMODUL_WPL` und `KESSEL_CANB`.
+- Bereich: Hex mit oder ohne `0x`, Ende inklusive, `HI` ≥ `LO`, maximal `0xFFFF`. Unbekannter Name oder `HI` < `LO` → Log-Warnung, nichts startet. Ein einzelner Wert hinter dem Member wird ignoriert, dann läuft ein Tabellenscan.
+- Takt fest 150 ms (`SCAN_GAP_MS`), eine Anfrage je Index. Normales Polling pausiert während des Scans (Request-Manager und Fehlerliste).
+- Ende: nach dem letzten Index 1 s Nachlauf (`SCAN_TAIL_MS`), dann `done`. `stop` → sofort `stopped`.
+- `scan/status`: `running` beim Start, danach alle 100 Indizes, zuletzt `done` oder `stopped`. `done` = abgefragte Indizes, `total` = Anzahl, `hits` = Treffer, `seconds` = Dauer.
+- Ergebnisse gehen sofort einzeln raus, nicht gesammelt. Veröffentlicht werden nur Antworten mit Rohwert ≠ `0x8000`. Ausbleibende Antworten (Timeout) werden nicht gemeldet. `raw` ist eine Dezimalzahl (`%u`), nicht ein Hex-String. `name` ist leer, wenn der Index nicht in der Tabelle steht (nur Bereichsscan). `value` ist der dekodierte Wert als Text.
+
+### 13.2 Sniffer `can_debug` (vorhanden, Opt-in)
+
+- Build-Schalter: Substitution `can_debug` (Standard `"false"`, Mk1 `"true"`). `can_debug_queue_size` (Standard 256 Frames, 16 Byte je Frame, nur solange der Sniffer an ist).
+- `set` ist nicht gespeichert: nach einem Neustart ist der Sniffer aus. `on` startet mit leerer Queue, `off` gibt den Speicher frei.
+- Frames enthalten RX und vom ESP gesendete Frames (`tx: true`). Ohne `u`. Kein Filter in der Firmware (Filter nur in der GUI, Abschnitt 8.7).
+
+| Topic | Richtung | Payload |
+|---|---|---|
+| `heatingpump/can_debug/set` | GUI/HA → ESP | `on` / `off` (Rohtext, kein JSON) |
+| `heatingpump/can_debug/state` | ESP → | `on` / `off`, retained |
+| `heatingpump/can_debug/frames` | ESP → | `[{"t":123456,"id":"0x180","d":"d200fa01120200","tx":false}]`, nicht retained, höchstens CAN_DEBUG_BATCH Frames je Nachricht |
+
+Andere Werte bei `set` werden nur geloggt.
+
+### 13.3 Kommandos cmd/* in der Produktiv-Firmware (geplant)
+
+- Geplant: Die Produktiv-Firmware bekommt optional die Kommandos `stiebel-debug/cmd/read|scan|probe|stop|write` der Debug-Firmware. Payload und Antworten bleiben gleich (Abschnitte 1, 7.2, 10).
+- Geplante Schalter: `debug_can_tools` (read, scan, probe, stop) und `debug_can_write` (write). Standard aus. Mk1 geplant: tools an, write aus.
+- Geplant: `stiebel-debug/status` meldet dann `"tools":true|false` und `"write":true|false`.
+- Noch nicht umgesetzt. Die GUI nutzt die Produktiv-Topics für Scan und Befehle noch nicht und sendet weiter an `stiebel-debug/cmd/*`. Umstellung folgt. Der Sniffer ist bereits umgestellt (Abschnitt 8.7).
+- Bestand (Mk1): Substitution `debug_can_status` (Mk1 `"true"`) schaltet `stiebel-debug/status` ab.

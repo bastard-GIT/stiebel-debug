@@ -1,27 +1,30 @@
 # Passiver Vollmitschnitt (nur lesen, keine CAN-Requests), z.B. beim Hochfahren der Waermepumpe.
 #
 # Zeichnet ohne Filter auf:
-#   <prefix>_rx.jsonl      jeder Frame aus stiebel-debug/rx (roh + dekodierte Elster-Felder)
+#   <prefix>_rx.jsonl      jeder Frame aus stiebel-debug/rx bzw. heatingpump/can_debug/frames (roh + dekodierte Elster-Felder)
 #   <prefix>_mqtt.jsonl    alle anderen Nachrichten unter heatingpump/# und stiebel-debug/# (status, availability ...)
 #   <prefix>_events.jsonl  Start/Ende, Marker, ESP-Neustart (millis springt zurueck), Ueberlauf
 #
-# Sniffer-Kommando wird RETAINED gesetzt: startet der ESP neu (z.B. weil er an der Waermepumpe haengt),
-# bekommt er es direkt beim MQTT-Connect. Zusaetzlich alle 5 s erneut. Am Ende: retained geloescht, Sniffer aus.
+# Sniffer-Kommando heatingpump/can_debug/set "on" (nicht retained). Alle 5 s erneut, damit ein
+# Neustart des ESP (z.B. weil er an der Waermepumpe haengt) innerhalb von 5 s wieder aufgezeichnet wird.
+# Am Ende: "off".
 #
 # Aufruf:
 #   bootlog.py run <minuten> <out_prefix>     Mitschnitt; Ende nach <minuten>, bei Ctrl+C oder Datei <out_prefix>.stop
 #   bootlog.py mark "<text>"                   Marker in laufenden Mitschnitt schreiben (z.B. "Strom ein")
 import os, sys, time, json, threading
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "mk1-i2c", "gui"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gui"))
 from mqtt_secrets import load_mqtt_settings
 import paho.mqtt.client as mqtt
 
-T_SNIFF = "stiebel-debug/cmd/sniff"
+T_CAN_SET = "heatingpump/can_debug/set"
+T_RX = ("stiebel-debug/rx", "heatingpump/can_debug/frames")
 T_MARK = "stiebel-debug/mark"
-SNIFF_ON = json.dumps({"on": True, "ids": [], "types": []})
+SNIFF_ON = "on"
+SNIFF_OFF = "off"
 
 host, port, user, pw = load_mqtt_settings(os.environ.get("STIEBEL_SECRETS") or os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "mk1-i2c", "secrets.yaml"))
+    os.path.dirname(os.path.abspath(__file__)), "..", "secrets.yaml"))
 
 
 def mark(text):
@@ -60,7 +63,7 @@ def run(minutes, prefix):
 
     def on_connect(c, u, fl, rc):
         c.subscribe("stiebel-debug/#"); c.subscribe("heatingpump/#")
-        c.publish(T_SNIFF, SNIFF_ON, retain=True)
+        c.publish(T_CAN_SET, SNIFF_ON)
         event("mqtt_connect", rc=rc)
 
     def on_disconnect(c, u, rc):
@@ -69,7 +72,7 @@ def run(minutes, prefix):
     def on_msg(c, u, m):
         now = round(time.time(), 3)
         with lock:
-            if m.topic == "stiebel-debug/rx":
+            if m.topic in T_RX:
                 for fr in json.loads(m.payload):
                     t = fr.get("t")
                     if st["last_t"] is not None and t is not None and t + 1000 < st["last_t"]:
@@ -88,7 +91,7 @@ def run(minutes, prefix):
                 except ValueError:
                     event("marker", text=m.payload.decode("utf-8", "replace"))
                 return
-            if m.topic == T_SNIFF:
+            if m.topic == T_CAN_SET:
                 return
             v = m.payload.decode("utf-8", "replace")
             f_mq.write(json.dumps({"ts": now, "topic": m.topic, "retained": bool(m.retain), "v": v},
@@ -126,7 +129,7 @@ def run(minutes, prefix):
         while time.time() < end and not os.path.exists(stop_file):
             time.sleep(1); n += 1
             if n % 5 == 0:
-                c.publish(T_SNIFF, SNIFF_ON)
+                c.publish(T_CAN_SET, SNIFF_ON)
                 with lock:
                     f_rx.flush(); f_mq.flush()
             if n % 30 == 0:
@@ -136,8 +139,7 @@ def run(minutes, prefix):
     except KeyboardInterrupt:
         pass
     finally:
-        c.publish(T_SNIFF, b"", retain=True).wait_for_publish(5)   # retained loeschen
-        c.publish(T_SNIFF, json.dumps({"on": False})).wait_for_publish(5)
+        c.publish(T_CAN_SET, SNIFF_OFF).wait_for_publish(5)
         time.sleep(1)
         with lock:
             event("ende", rx=st["rx"], tx=st["tx"], mqtt=st["mq"], esp_neustarts=st["boots"])

@@ -1,17 +1,22 @@
 # Passiver Langzeit-Mitschnitt (nur lesen, keine CAN-Requests) fuer todo.md 2026-10-31:
 #  - alle HA-States unter heatingpump/# bei Aenderung (Energie Summe/Tag, VERDICHTER, PUMPENSTATUS ...)
-#  - Roh-Antworten (Typ 2) ausgewaehlter Indizes aus stiebel-debug/rx (Sniffer, alle 60 s neu eingeschaltet,
+#  - Roh-Antworten (Typ 2) ausgewaehlter Indizes aus heatingpump/can_debug/frames (Sniffer, alle 60 s neu eingeschaltet,
 #    damit er einen Neustart/OTA der Firmware ueberlebt)
 # Aufruf: nachtlog.py <stunden> <out_prefix>  ->  <out_prefix>_states.jsonl, <out_prefix>_rx.jsonl
 import os, sys, time, json, threading
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "mk1-i2c", "gui"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gui"))
 from mqtt_secrets import load_mqtt_settings
 import paho.mqtt.client as mqtt
+
+T_CAN_SET = "heatingpump/can_debug/set"
+T_RX = ("stiebel-debug/rx", "heatingpump/can_debug/frames")
+SNIFF_ON = "on"
+SNIFF_OFF = "off"
 
 WATCH = {0x07a8, 0x01d2, 0xfdad, 0x0a20, 0x0176, 0x4eef, 0x07a3, 0x07a4, 0x07a5, 0x07a9, 0x0822, 0x0833, 0x05d7}
 WATCH |= set(range(0x091a, 0x0932))  # Energie-Register
 
-host, port, user, pw = load_mqtt_settings(os.environ.get("STIEBEL_SECRETS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "mk1-i2c", "secrets.yaml"))
+host, port, user, pw = load_mqtt_settings(os.environ.get("STIEBEL_SECRETS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "secrets.yaml"))
 hours = float(sys.argv[1]); prefix = sys.argv[2]
 f_st = open(prefix + "_states.jsonl", "a", encoding="utf-8")
 f_rx = open(prefix + "_rx.jsonl", "a", encoding="utf-8")
@@ -28,7 +33,7 @@ def decode(d):
     return b[2], b[3] << 8 | b[4]
 
 def sniff_on(c):
-    c.publish("stiebel-debug/cmd/sniff", json.dumps({"on": True}))
+    c.publish(T_CAN_SET, SNIFF_ON)
 
 def on_connect(c, u, fl, rc):
     c.subscribe("heatingpump/#"); c.subscribe("stiebel-debug/rx"); sniff_on(c)
@@ -36,7 +41,7 @@ def on_connect(c, u, fl, rc):
 def on_msg(c, u, m):
     now = time.time()
     with lock:
-        if m.topic == "stiebel-debug/rx":
+        if m.topic in T_RX:
             for fr in json.loads(m.payload):
                 if fr.get("tx"):
                     continue
@@ -64,5 +69,5 @@ try:
             f_st.flush(); f_rx.flush()
             print(time.strftime("%H:%M"), "states", cnt["st"], "rx", cnt["rx"], flush=True)
 finally:
-    c.publish("stiebel-debug/cmd/sniff", json.dumps({"on": False})).wait_for_publish(5)
+    c.publish(T_CAN_SET, SNIFF_OFF).wait_for_publish(5)
     time.sleep(1); c.loop_stop(); f_st.close(); f_rx.close()
