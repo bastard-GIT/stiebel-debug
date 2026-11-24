@@ -52,39 +52,27 @@ Das Paket ist nicht allein baubar: es braucht die Waermepumpen-Firmware (Hooks, 
 
 | Ordner | Inhalt |
 |---|---|
-| `mk1-debug/` | Eigene Debug-Firmware `mk1-debug.yaml` (Scanner, Lesen/Schreiben per MQTT; **keine Paket-Variante**, wird anstelle der Produktiv-Firmware geflasht), `firmware/`, PySide6-GUI `gui/`, `tools/`, `tests/`, `referenz/`, `INTERFACES.md`, `run_full.py` |
+| `mk1-debug/` | Eigene Debug-Firmware `mk1-debug.yaml` (Scanner, Lesen/Schreiben per MQTT; **keine Paket-Variante**, wird anstelle der Produktiv-Firmware geflasht), `firmware/`, `tools/`, `tests/` (C++), `INTERFACES.md`, `run_full.py`; die Debug-GUI ist ausgezogen (siehe unten) |
 | `mk1-i2c/` | Test-Firmware `mk1-i2c.yaml` und GUI fuer die LWZ-180-I2C-Schnittstelle (Display, Luefter), `firmware/`, `gui/`, `tests/`, `referenz/`, `INTEGRATION.md`, `INTERFACES.md` |
 | `i2c_sniffer/` | Dokumentation zum I2C-Sniffer (`DOKUMENTATION.md`) |
 
 Die Unterordner-READMEs stammen aus der Arbeitsumgebung des Autors und nennen teils Windows-Pfade (`C:\temp\stiebel-Remote`).
 IP-Adressen sind durch `<ip-mk1>` und `<ip-broker>` ersetzt.
 
-### Abhaengigkeiten und Start
+### Debug-GUI (ausgezogen)
+
+Die PySide6-GUI für die Bus-Analyse (früher `mk1-debug/gui`) liegt seit 2026-11-24 im eigenen Repo
+[ha-stiebel-control-gui](https://github.com/bastard-GIT/ha-stiebel-control-gui) (Installation, Start, Referenztabelle `ElsterTable.json`, Tests: dessen README, deutsch: `README.de.md`).
+Sie spricht die Debug-Firmware (`stiebel-debug/`) und die Produktiv-Firmware (`heatingpump/`) an.
+`mk1-debug/tools/` und `mk1-debug/run_full.py` importieren GUI-Module und brauchen dafür eine Kopie von `gui/` aus dem neuen Repo.
+
+### I2C-GUI
 
 ```
-pip install PySide6 "paho-mqtt<2"      # mk1-debug/gui/requirements.txt
-python mk1-debug/gui/elster_gui.py     # Debug-GUI
-python mk1-i2c/gui/i2c_gui.py          # I2C-GUI
+pip install PySide6 "paho-mqtt<2"
+python mk1-i2c/gui/i2c_gui.py
+cd mk1-i2c && QT_QPA_PLATFORM=offscreen python -m pytest -q tests
 ```
-
-Tests (Python 3, pytest):
-
-```
-cd mk1-debug && QT_QPA_PLATFORM=offscreen python -m pytest -q tests
-cd mk1-i2c   && QT_QPA_PLATFORM=offscreen python -m pytest -q tests
-```
-
-### Referenztabelle (ElsterTable.json)
-
-Die GUI braucht `ElsterTable.json` aus https://github.com/bastard-GIT/elster_reference. Klone das Repo neben dieses Repo:
-
-```
-git clone https://github.com/bastard-GIT/elster_reference ../elster_reference
-```
-
-Suchreihenfolge (`mk1-debug/gui/elster.py`, `default_reference_path()`): Umgebungsvariable `ELSTER_REFERENCE_JSON`,
-dann `../elster_reference/ElsterTable.json`, dann der alte Pfad `../referenzen/elster_reference/ElsterTable.json`.
-Die Tests nutzen dieselbe Funktion.
 
 ### Zugangsdaten und Umgebungsvariablen
 

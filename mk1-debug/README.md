@@ -1,4 +1,4 @@
-# mk1-debug – CAN/Elster-Debug-Firmware und GUI
+# mk1-debug – CAN/Elster-Debug-Firmware
 
 Diese Anleitung beschreibt das Debug-Werkzeug für die Stiebel Eltron WPL-A am Mk1-Gerät (ESP32-S3, `<ip-mk1>`). Sie richtet sich an den Projektbesitzer, der das Gerät selbst flasht.
 
@@ -9,7 +9,7 @@ Diese Datei enthält keine Zugangsdaten. Passwörter und Schlüssel stehen aussc
 Das Werkzeug besteht aus zwei Teilen:
 
 1. **Debug-Firmware** (ESPHome, esp-idf) auf dem Mk1-ESP32-S3. Sie liest den CAN-Bus mit, sendet gezielte Lese-Requests, führt Index-Scans und Member-Probes durch. Sie dekodiert nicht. Schreiben ist nur über `cmd/write` möglich, mit Rücklesen und Sicherheitsprüfungen. Die Ergebnisse gehen per MQTT (Präfix `stiebel-debug/`).
-2. **PySide6-GUI** auf dem PC. Sie steuert die Firmware per MQTT, dekodiert Frames anhand von `ElsterTable.json` und exportiert Mitschnitte.
+2. **GUI** auf dem PC (eigenes Repo [ha-stiebel-control-gui](https://github.com/bastard-GIT/ha-stiebel-control-gui)). Sie steuert die Firmware per MQTT, dekodiert Frames anhand von `ElsterTable.json` und exportiert Mitschnitte.
 
 Funktionen:
 
@@ -36,17 +36,10 @@ mk1-debug/
     elster_frame.h              Frame-Aufbau und Parser
     debug_json.h                Minimal-JSON für MQTT
     can_debug.h                 Sniffer, Abfrage, Scanner, MQTT-Ausgabe
-  gui/
-    elster_gui.py               PySide6-Hauptfenster
-    elster.py                   Dekodierung/Kodierung auf Basis von ElsterTable.json
-    export_io.py                CSV- und JSONL-Export/Import
-    mqtt_client.py              paho-mqtt in eigenem Thread, Signale an Qt
-    tab_live.py, tab_query.py, tab_scanner.py, tab_status.py
-    requirements.txt            PySide6, paho-mqtt
-  tests/                        Tests für Python (pytest/unittest) und Header-Testquellen
+  tests/                        Header-Testquellen (C++)
 ```
 
-Referenztabelle: `..\referenzen\elster_reference\ElsterTable.json` (Lesehilfe: `ElsterTable.README.md` im selben Ordner).
+Die GUI (früher `gui/`) und ihre Python-Tests liegen im Repo ha-stiebel-control-gui. `tools/` und `run_full.py` importieren Module der GUI (`elster.py`, `auto_runner.py`, `type_guess.py`) und laufen nur, wenn die GUI-Module dort wieder unter `gui/` liegen (Kopie oder Verzeichnis-Link aus ha-stiebel-control-gui).
 
 Der Ordner `esp32-s3-technik-mk1` (Produktiv-Firmware) bleibt unverändert.
 
@@ -54,11 +47,7 @@ Der Ordner `esp32-s3-technik-mk1` (Produktiv-Firmware) bleibt unverändert.
 
 - **Python-venv:** `C:\temp\stiebel-Remote\.venv\`
 - **ESPHome 2026.9.1** im venv: `C:\temp\stiebel-Remote\.venv\Scripts\esphome.exe`
-- **PySide6** und **paho-mqtt** (1.6.x-API) für die GUI, installiert im selben venv:
-
-  ```
-  C:\temp\stiebel-Remote\.venv\Scripts\python.exe -m pip install -r C:\temp\stiebel-Remote\mk1-debug\gui\requirements.txt
-  ```
+- **GUI:** Repo [ha-stiebel-control-gui](https://github.com/bastard-GIT/ha-stiebel-control-gui) (PySide6, paho-mqtt), eigene Installation dort.
 
 - MQTT-Broker `<ip-broker>`, Port <port>, Benutzer `<user>`. Das Passwort wird nicht in Dateien geschrieben.
 
@@ -114,19 +103,7 @@ Danach prüfen, ob die Werte wieder in Home Assistant erscheinen.
 
 ## Bedienung der GUI
 
-Start (aus dem Ordner `mk1-debug`):
-
-```
-C:\temp\stiebel-Remote\.venv\Scripts\python.exe gui\elster_gui.py
-```
-
-- **Verbinden:** Broker, Port und Benutzer eingeben. Das Passwort wird bei jedem Start abgefragt und nicht gespeichert.
-- **Tab Live:** Rohframes und dekodierte Werte. Filter nach CAN-ID, Nachrichtenart und Index/Name. Pause, Löschen, Autoscroll. Ansicht umschaltbar zwischen allen Frames und dem letzten Wert pro Index. Schaltfläche zum Senden der Sniffer-Filter an die Firmware. Bei der Produktiv-Firmware filtert die GUI selbst (die Firmware kennt keinen Filter) und zeigt den Sniffer-Zustand der Firmware an.
-- **Tab Abfrage:** Member aus der Liste wählen, Index per Hex oder Namenssuche angeben. Das Ergebnis wird dekodiert angezeigt, der Verlauf als Tabelle. Im Produktiv-Modus aktiv, Absender, Timeout und Format sind dort deaktiviert. Schreiben nach Freischalten und Bestätigung; Status `rejected` erscheint als Warnung.
-- **Tab Scanner:** Member, Indexbereich und Pause (mindestens 100 ms, Standard 200 ms) eingeben. Start und Stopp, Fortschrittsanzeige, Trefferliste mit Namen aus der Referenz oder `UNK_0x…`. Im Produktiv-Modus aktiv (Takt fest 150 ms, Format und Pause deaktiviert), mit Hex-ID-Feld und Teilnehmer-Suche (`scan/members`).
-- **Tab Status:** Zähler aus dem Status-Topic (RX, TX, Füllstand des Ringpuffers, Überläufe, TWAI-Fehler, Bus-Off). Felder, die die Firmware nicht sendet (bei der Produktiv-Firmware fast alle außer RX und Heap), zeigt die Anzeige als `-`.
-- **Exporte:** Mitschnitt als CSV oder als Rohlog (JSON-Lines). Trefferliste des Scanners als CSV. Abgleich mit der Referenz: bekannt, unbekannt oder anderer Typ.
-- **Offline-Log:** Über Menü Datei → Offline-Log laden kann ein gespeichertes Rohlog ohne Verbindung dekodiert angezeigt werden.
+Die GUI ist ausgezogen in das eigene Repo [ha-stiebel-control-gui](https://github.com/bastard-GIT/ha-stiebel-control-gui) (Installation, Start, Tabs: dessen README, deutsch: README.de.md). Sie spricht sowohl diese Debug-Firmware (Präfix `stiebel-debug/`) als auch die Produktiv-Firmware (`heatingpump/`) an.
 
 ## MQTT-Topics
 
