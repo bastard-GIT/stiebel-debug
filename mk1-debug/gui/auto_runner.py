@@ -28,6 +28,7 @@ import paho.mqtt.client as mqtt
 # Mit -I ist das Skriptverzeichnis nicht im sys.path.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mqtt_secrets import SECRETS_PATH, SECRET_KEYS, parse_secrets  # noqa: E402,F401
+import prod_api as pa  # noqa: E402
 
 PREFIX = "stiebel-debug/"
 PC_CAN_ID = 0x680
@@ -86,6 +87,15 @@ EXTRA_STAGES = ("A1", "A2", "B", "C")
 SWITCH_DEFAULT = 0xFA
 SWITCH_VALUES = (0xF7, 0xF8, 0xF9, 0xFA)
 MINMAX_SWITCHES = (0xF8, 0xF9)
+# Firmware-Wahl (CLI --fw). prod = Produktiv-API (prod_api.py, Topic-Wurzel heatingpump).
+FW_DEBUG = "debug"
+FW_PROD = "prod"
+BUSY_PAUSE_S = 1.0  # Pause vor der einen Wiederholung nach "busy"
+PROD_A1_SKIP = "format short nicht verfuegbar (Produktiv)"
+PROD_DELAY_NOTE = "delay_ms ignoriert (Produktiv: Firmware-Takt 150 ms)"
+PROD_TOPICS = (pa.PROD_ROOT + "/status", pa.TOPIC_CAN_DEBUG_FRAMES,
+               pa.TOPIC_SCAN_WILDCARD, pa.TOPIC_RAW_RESULT)
+PROD_SUFFIXES = ("scan/status", "scan/hit", "scan/member", "raw/result")
 
 
 class ConfigError(Exception):
@@ -118,6 +128,7 @@ class Timing:
     stall_s: float = STALL_S
     read_timeout_s: float = READ_TIMEOUT_S
     reread_gap_s: float = REREAD_GAP_S
+    busy_pause_s: float = BUSY_PAUSE_S
 
 
 @dataclass(frozen=True)
@@ -358,9 +369,10 @@ def bus_problem(prev_twai_err: int | None, status: dict) -> str | None:
 # ----------------------------------------------------------------------
 # State (_state.json)
 # ----------------------------------------------------------------------
-def new_state(delay_ms: int, smoke: bool) -> dict:
+def new_state(delay_ms: int, smoke: bool, fw: str = FW_DEBUG) -> dict:
     return {
         "version": 1,
+        "fw": fw,
         "started": now_iso(),
         "finished": None,
         "delay_ms": delay_ms,
@@ -371,6 +383,7 @@ def new_state(delay_ms: int, smoke: bool) -> dict:
         "silent": None,
         "tasks": [],
         "rereads": [],
+        "skipped": [],
     }
 
 
@@ -402,8 +415,9 @@ class Runner:
     def __init__(self, transport, state: dict, *, state_path: str, timing: Timing,
                  log: logging.Logger, smoke: bool, delay_ms: int, status_fp=None,
                  clock=time.monotonic, d_members=D_MEMBERS, extra_members=EXTRA_MEMBERS,
-                 minmax: bool = False):
+                 minmax: bool = False, prod: bool = False):
         self.transport = transport
+        self.prod = prod
         self.state = state
         self.state_path = state_path
         self.timing = timing
@@ -429,6 +443,13 @@ class Runner:
         self._probe_done = False
         self._probe_items: list[dict] = []
         self._read_results: dict[tuple[int, int, int], dict] = {}  # (member, index, switch)
+        # Produktiv-Modus: eigener Scan. expect = {"mode", "name" (klein, None = egal), "switch"}.
+        # Treffer/Member/Status werden erst nach "running" mit passendem mode gewertet.
+        self._prod_expect: dict | None = None
+        self._prod_armed = False
+        self._prod_done = False
+        self._prod_hits: list[dict] = []
+        self._prod_members: list[dict] = []
 
     # -- Einstieg ------------------------------------------------------
     def execute(self) -> int:
@@ -449,8 +470,13 @@ class Runner:
 
     def run(self) -> int:
         st = self.state
+        st["fw"] = FW_PROD if self.prod else FW_DEBUG
+        st.setdefault("skipped", [])
+        if self.prod and self.delay_ms != MIN_DELAY_MS:
+            self._note_skipped(PROD_DELAY_NOTE)
+            self.log.warning("%s", PROD_DELAY_NOTE)
         self._wait_online()
-        self._publish("cmd/sniff", {"on": True, "ids": [], "types": []})
+        self._sniff(True)
         if st["probe"] is None:
             self._step1()
         if not st["tasks"] and st["members"] is not None:
@@ -465,13 +491,17 @@ class Runner:
             self._minmax()
         st["finished"] = now_iso()
         self._save()
-        self._publish("cmd/sniff", {"on": False, "ids": [], "types": []})
+        self._sniff(False)
         self.log.info("Automatik fertig")
         return EXIT_OK
 
     def _stop(self) -> None:
         try:
-            self.transport.publish("cmd/stop", {})
+            if self.prod:
+                self.transport.publish_text(pa.TOPIC_SCAN_STOP, "stop")
+                self.transport.publish_text(pa.TOPIC_CAN_DEBUG_SET, "off")
+            else:
+                self.transport.publish("cmd/stop", {})
         except Exception:
             pass
         try:
@@ -498,19 +528,22 @@ class Runner:
 
     def _probe(self) -> None:
         lo, hi = self.probe_range
-        self._probe_items = []
-        self._probe_done = False
-        self._last_progress = self.clock()
-        self._publish("cmd/probe", {
-            "index": hex_index(PROBE_INDEX),
-            "from_id": hex_member(lo),
-            "to_id": hex_member(hi),
-            "delay_ms": self.delay_ms,
-        })
-        self._wait_until(lambda: self._probe_done, stall=True)
-        # Nachzuegler der letzten probe/result-Chunks abwarten
-        self._wait_until(lambda: False, self.timing.read_timeout_s)
-        items = list(self._probe_items)
+        if self.prod:
+            items = self._probe_prod(lo, hi)
+        else:
+            self._probe_items = []
+            self._probe_done = False
+            self._last_progress = self.clock()
+            self._publish("cmd/probe", {
+                "index": hex_index(PROBE_INDEX),
+                "from_id": hex_member(lo),
+                "to_id": hex_member(hi),
+                "delay_ms": self.delay_ms,
+            })
+            self._wait_until(lambda: self._probe_done, stall=True)
+            # Nachzuegler der letzten probe/result-Chunks abwarten
+            self._wait_until(lambda: False, self.timing.read_timeout_s)
+            items = list(self._probe_items)
         members = members_from_probe(items)
         self.state["probe"] = {"index": hex_index(PROBE_INDEX), "items": items}
         self.state["members"] = [hex_member(m) for m in members]
@@ -579,6 +612,10 @@ class Runner:
             if task["done"]:
                 i += 1
                 continue
+            if self.prod and task["stage"] == "A1":
+                self._skip_task(task, PROD_A1_SKIP)
+                i += 1
+                continue
             if task["stage"] == "D" and not expanded:
                 expanded = True  # vor dem ersten D-Task einmal pruefen
                 if self._expand_extra_d(tasks, i):
@@ -602,6 +639,9 @@ class Runner:
             i += 1
 
     def _run_scan_task(self, task: dict) -> None:
+        if self.prod:
+            self._run_prod_scan(task)
+            return
         member = parse_hex(task["member"])
         sw = entry_switch(task)
         key = (member, sw)
@@ -672,6 +712,8 @@ class Runner:
             self.log.info("Durchgang %d fertig", number)
 
     def _read_one(self, member: str, index: str, switch: int = SWITCH_DEFAULT) -> dict:
+        if self.prod:
+            return self._read_one_prod(member, index, switch)
         key = (parse_hex(member), parse_hex(index), switch)
         self._read_results.pop(key, None)
         payload = {"member": member, "index": index}
@@ -763,6 +805,9 @@ class Runner:
 
     # -- Eingehende Nachrichten ----------------------------------------
     def _dispatch(self, suffix: str, data) -> None:
+        if self.prod and suffix in PROD_SUFFIXES:
+            self._dispatch_prod(suffix, data)
+            return
         if suffix == "availability":
             if data == "online":
                 self.online = True
@@ -819,6 +864,140 @@ class Runner:
             except (KeyError, TypeError, ValueError):
                 pass
 
+    # -- Produktiv-Modus (prod_api) --------------------------------------
+    def _send_text(self, topic: str, text: str) -> None:
+        self.transport.publish_text(topic, text)
+
+    def _sniff(self, on: bool) -> None:
+        if self.prod:
+            self._send_text(pa.TOPIC_CAN_DEBUG_SET, "on" if on else "off")
+        else:
+            self._publish("cmd/sniff", {"on": on, "ids": [], "types": []})
+
+    def _note_skipped(self, text: str) -> None:
+        skipped = self.state.setdefault("skipped", [])
+        if text not in skipped:
+            skipped.append(text)
+
+    def _skip_task(self, task: dict, text: str) -> None:
+        task["done"] = True
+        task["skipped"] = text
+        self._note_skipped(text)
+        self.log.warning("Teil-Scan %s %s %s-%s uebersprungen: %s", task["stage"],
+                         task["member"], task["from"], task["to"], text)
+        self._save()
+
+    def _prod_begin(self, mode: str, name: str | None, switch: int | None) -> None:
+        self._prod_expect = {"mode": mode, "name": name.lower() if name else None,
+                             "switch": switch}
+        self._prod_armed = False
+        self._prod_done = False
+        self._prod_hits = []
+        self._prod_members = []
+
+    def _prod_end(self) -> None:
+        self._prod_expect = None
+        self._prod_armed = False
+
+    def _prod_match(self, mode, member) -> bool:
+        exp = self._prod_expect
+        if exp is None or mode != exp["mode"]:
+            return False
+        return exp["name"] is None or str(member).lower() == exp["name"]
+
+    def _prod_status(self, data: dict) -> None:
+        if self._prod_expect is None:
+            return  # kein eigener Scan aktiv: retained Altlasten ignorieren
+        if not self._prod_armed:
+            if data.get("state") == "running" and self._prod_match(data.get("mode"),
+                                                                   data.get("member")):
+                self._prod_armed = True
+                self._last_progress = self.clock()
+            return
+        self._last_progress = self.clock()
+        if data.get("state") in ("done", "stopped") and self._prod_match(data.get("mode"),
+                                                                         data.get("member")):
+            self._prod_done = True
+            self._prod_expect = None
+            self._prod_armed = False
+
+    def _prod_hit(self, data: dict) -> None:
+        exp = self._prod_expect
+        if exp is None or not self._prod_armed or exp["mode"] != "range":
+            return
+        if str(data.get("name", "")).lower() != exp["name"] or data.get("switch") != exp["switch"]:
+            return
+        self._prod_hits.append(data)
+
+    def _prod_member(self, data: dict) -> None:
+        exp = self._prod_expect
+        if exp is None or not self._prod_armed or exp["mode"] != "members":
+            return
+        self._prod_members.append(data)
+
+    def _dispatch_prod(self, suffix: str, data) -> None:
+        if suffix == "scan/status":
+            self._prod_status(data)
+            self._write_status(data)
+        elif suffix == "scan/hit":
+            self._prod_hit(data)
+        elif suffix == "scan/member":
+            self._prod_member(data)
+        elif suffix == "raw/result" and data.get("op") == "read":
+            self._read_results[(data["id"], data["index"], data["switch"])] = data
+
+    def _probe_prod(self, lo: int, hi: int) -> list[dict]:
+        """Teilnehmer-Suche per scan/members. Antwort 0x8000 = unsupported (Member antwortet)."""
+        self._prod_begin("members", None, None)
+        self._last_progress = self.clock()
+        try:
+            self._send_text(pa.TOPIC_SCAN_MEMBERS, pa.members_payload(lo, hi, PROBE_INDEX))
+            self._wait_until(lambda: self._prod_done, stall=True)
+            found = list(self._prod_members)
+        finally:
+            self._prod_end()
+        return [{"id": hex_member(m["id"]),
+                 "status": "unsupported" if m["raw"] == 0x8000 else "ok",
+                 "raw": m["raw"]} for m in found]
+
+    def _run_prod_scan(self, task: dict) -> None:
+        member = parse_hex(task["member"])
+        sw = entry_switch(task)
+        self._prod_begin("range", pa.member_topic_name(member), sw)
+        self._last_progress = self.clock()
+        try:
+            self._send_text(pa.TOPIC_SCAN_START, pa.scan_start_payload(
+                member, parse_hex(task["from"]), parse_hex(task["to"]), sw))
+            self._wait_until(lambda: self._prod_done, stall=True)
+            hits = list(self._prod_hits)
+        finally:
+            self._prod_end()
+        if not hits:
+            self.log.info("Kein Treffer fuer %s", task["member"])
+        for hit in hits:
+            task["items"].append({"index": hex_index(hit["index"]), "raw": hit["raw"],
+                                  "status": "ok"})
+        task["done"] = True
+
+    def _read_one_prod(self, member: str, index: str, switch: int) -> dict:
+        mid = parse_hex(member)
+        idx = parse_hex(index)
+        key = (mid, idx, switch)
+        res = None
+        for attempt in (1, 2):
+            self._read_results.pop(key, None)
+            self._send_text(pa.TOPIC_RAW_READ, pa.raw_read_payload(mid, idx, switch))
+            self._wait_until(lambda: key in self._read_results, self.timing.read_timeout_s)
+            res = self._read_results.pop(key, None)
+            if res is None or res.get("status") != "busy" or attempt == 2:
+                break
+            self.log.info("Read %s %s busy, Wiederholung", member, index)
+            self._wait_until(lambda: False, self.timing.busy_pause_s, guard=False)
+        self._wait_until(lambda: False, self.timing.gap_s, guard=False)
+        if res is None:
+            return {"raw": None, "status": "timeout"}
+        return {"raw": res.get("raw"), "status": res.get("status")}
+
     def _write_status(self, data: dict) -> None:
         if self.status_fp is None:
             return
@@ -830,10 +1009,11 @@ class Runner:
 def execute(transport, state: dict, *, state_path: str, timing: Timing,
             log: logging.Logger, smoke: bool, delay_ms: int, status_fp=None,
             clock=time.monotonic, d_members=D_MEMBERS, extra_members=EXTRA_MEMBERS,
-            minmax: bool = False) -> int:
+            minmax: bool = False, prod: bool = False) -> int:
     runner = Runner(transport, state, state_path=state_path, timing=timing, log=log,
                     smoke=smoke, delay_ms=delay_ms, status_fp=status_fp, clock=clock,
-                    d_members=d_members, extra_members=extra_members, minmax=minmax)
+                    d_members=d_members, extra_members=extra_members, minmax=minmax,
+                    prod=prod)
     return runner.execute()
 
 
@@ -841,9 +1021,16 @@ def execute(transport, state: dict, *, state_path: str, timing: Timing,
 # Echte MQTT-Transport-Schicht (paho-mqtt 1.6.x)
 # ----------------------------------------------------------------------
 class PahoTransport:
-    """publish() sendet; poll() liefert Events (suffix, data). rx-Frames werden im paho-Thread in rx_fp geschrieben."""
+    """publish() sendet; poll() liefert Events (suffix, data). rx-Frames werden im paho-Thread in rx_fp geschrieben.
 
-    def __init__(self, cfg: BrokerConfig, rx_fp, log: logging.Logger):
+    prod=True: Produktiv-API (prod_api), publish_text() sendet Rohtext auf volle Topics,
+    poll() liefert availability, rx, scan/status, scan/hit, scan/member und raw/result.
+    """
+
+    _prod = False  # Klassenstandard, falls ein Objekt ohne __init__ gebaut wird (Tests)
+
+    def __init__(self, cfg: BrokerConfig, rx_fp, log: logging.Logger, prod: bool = False):
+        self._prod = prod
         self._cfg = cfg
         self._rx = rx_fp
         self._log = log
@@ -871,6 +1058,10 @@ class PahoTransport:
     def publish(self, suffix: str, payload: dict) -> None:
         self._client.publish(PREFIX + suffix, json.dumps(payload), qos=0)
 
+    def publish_text(self, topic: str, text: str) -> None:
+        """Rohtext auf ein volles Topic (Produktiv-Modus)."""
+        self._client.publish(topic, text, qos=0)
+
     def poll(self, timeout: float) -> list[tuple[str, object]]:
         events = []
         try:
@@ -887,11 +1078,15 @@ class PahoTransport:
         if rc != 0:
             self._log.error("Broker lehnt Verbindung ab (rc=%s)", rc)
             return
-        for topic in RX_TOPICS:
-            client.subscribe(PREFIX + topic, qos=0)
+        topics = PROD_TOPICS if self._prod else tuple(PREFIX + t for t in RX_TOPICS)
+        for topic in topics:
+            client.subscribe(topic, qos=0)
 
     def _on_message(self, client, userdata, msg):
         try:
+            if self._prod:
+                self._on_prod_message(msg)
+                return
             if not msg.topic.startswith(PREFIX):
                 return
             suffix = msg.topic[len(PREFIX):]
@@ -903,26 +1098,60 @@ class PahoTransport:
                 return
             data = json.loads(text)
             if suffix == "rx":
-                frames = []
-                for item in data:
-                    self._rx.write(json.dumps(item, separators=(",", ":")) + "\n")
-                    frame = {
-                        "t": int(item["t"]),
-                        "id": parse_hex(item["id"]),
-                        "data": bytes.fromhex(item["d"]),
-                        "tx": bool(item["tx"]),
-                    }
-                    u = int(item.get("u") or 0)
-                    if u > 0:
-                        frame["ts"] = round(u / 1000, 3)
-                    frames.append(frame)
-                self._rx.flush()
-                if frames:
-                    self._queue.put(("rx", frames))
+                self._queue_rx(data)
                 return
             self._queue.put((suffix, data))
         except Exception:
             self._log.debug("Ungueltige Nachricht ignoriert")
+
+    def _queue_rx(self, data) -> None:
+        frames = []
+        for item in data:
+            self._rx.write(json.dumps(item, separators=(",", ":")) + "\n")
+            frame = {
+                "t": int(item["t"]),
+                "id": parse_hex(item["id"]),
+                "data": bytes.fromhex(item["d"]),
+                "tx": bool(item["tx"]),
+            }
+            u = int(item.get("u") or 0)
+            if u > 0:
+                frame["ts"] = round(u / 1000, 3)
+            frames.append(frame)
+        self._rx.flush()
+        if frames:
+            self._queue.put(("rx", frames))
+
+    def _on_prod_message(self, msg) -> None:
+        topic = msg.topic
+        text = msg.payload.decode("utf-8")
+        if topic == PROD_TOPICS[0]:
+            self._queue.put(("availability", text.strip()))
+        elif topic == pa.TOPIC_CAN_DEBUG_FRAMES:
+            self._queue_rx(json.loads(text))
+        elif topic == pa.TOPIC_RAW_RESULT:
+            res = pa.parse_raw_result(text)
+            if res is not None:
+                self._queue.put(("raw/result", res))
+        elif topic == pa.TOPIC_SCAN_STATUS:
+            res = pa.parse_scan_status(text)
+            if res is not None:
+                self._queue.put(("scan/status", res))
+        else:
+            can_id = pa.parse_member_topic(topic)
+            if can_id is not None:
+                res = pa.parse_member_result(text)
+                if res is not None:
+                    self._queue.put(("scan/member", {"id": can_id, **res}))
+                return
+            parsed = pa.parse_scan_result_topic(topic)
+            if parsed is not None:
+                res = pa.parse_scan_result(text)
+                if res is not None:
+                    name, index, switch = parsed
+                    self._queue.put(("scan/hit", {"name": name, "index": index,
+                                                  "switch": switch, "raw": res["raw"],
+                                                  "value": res["value"]}))
 
 
 # ----------------------------------------------------------------------
@@ -972,6 +1201,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Extra-Member fuer A1/A2/B/C (Hex, kommagetrennt; 'none' = keine)")
     ap.add_argument("--minmax", action="store_true",
                     help="nach den Rereads Min (switch f8) und Max (switch f9) je Treffer lesen")
+    ap.add_argument("--fw", choices=(FW_DEBUG, FW_PROD), default=FW_DEBUG,
+                    help="Firmware: debug (stiebel-debug) oder prod (Produktiv-API heatingpump)")
     return ap
 
 
@@ -1013,16 +1244,20 @@ def main(argv=None) -> int:
             return EXIT_ERROR
         state_path = args.resume
         smoke = bool(state.get("smoke", args.smoke))
+        fw = state.get("fw") or FW_DEBUG
         log.info("Fortsetzen aus %s", state_path)
     else:
-        state = new_state(delay_ms, args.smoke)
+        fw = args.fw
+        state = new_state(delay_ms, args.smoke, fw)
         state_path = f"{prefix}_state.json"
         smoke = args.smoke
+    prod = fw == FW_PROD
+    log.info("Firmware: %s", fw)
 
     timing = Timing(passive_s=max(0.0, args.passive), gap_s=delay_ms / 1000.0)
     rx_fp = open(f"{prefix}_rx.jsonl", "a", encoding="utf-8", buffering=1)
     status_fp = open(f"{prefix}_status.jsonl", "a", encoding="utf-8", buffering=1)
-    transport = PahoTransport(cfg, rx_fp, log)
+    transport = PahoTransport(cfg, rx_fp, log, prod=prod)
     try:
         try:
             transport.connect()
@@ -1032,7 +1267,7 @@ def main(argv=None) -> int:
         return execute(transport, state, state_path=state_path, timing=timing, log=log,
                        smoke=smoke, delay_ms=delay_ms, status_fp=status_fp,
                        d_members=args.d_members, extra_members=args.extra_members,
-                       minmax=args.minmax)
+                       minmax=args.minmax, prod=prod)
     finally:
         transport.close()
         rx_fp.close()

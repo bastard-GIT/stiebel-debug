@@ -86,6 +86,13 @@ def _assert_query_open(tab):
     assert tab._fw_label.isHidden()
 
 
+def _assert_query_open_prod(tab):
+    # Produktiv: Format bleibt gesperrt (raw/read kennt kein kurz/lang), Rest offen
+    assert all(w.isEnabled() for w in _query_controls(tab) if w is not tab._format_combo)
+    assert not tab._format_combo.isEnabled()
+    assert tab._fw_label.isHidden()
+
+
 def _assert_scanner_locked(tab, text):
     assert all(not w.isEnabled() for w in _scanner_controls(tab))
     assert not tab._fw_label.isHidden()
@@ -105,11 +112,11 @@ def test_query_locked_when_unknown(qapp, db):
     _assert_query_locked(tab, UNKNOWN_TEXT)
 
 
-def test_query_locked_when_prod(qapp, db):
+def test_query_open_when_prod(qapp, db):
     fake = FakeBridge()
     tab = tab_query.QueryTab(db, fake)
     fake.firmware_kind.emit("prod")
-    _assert_query_locked(tab, PROD_TEXT)
+    _assert_query_open_prod(tab)
 
 
 def test_query_open_when_debug(qapp, db):
@@ -119,12 +126,12 @@ def test_query_open_when_debug(qapp, db):
     _assert_query_open(tab)
 
 
-def test_query_relocks_when_prod_after_debug(qapp, db):
+def test_query_stays_open_from_debug_to_prod_and_locks_on_unknown(qapp, db):
     fake = FakeBridge()
     tab = tab_query.QueryTab(db, fake)
     fake.firmware_kind.emit("debug")
     fake.firmware_kind.emit("prod")
-    _assert_query_locked(tab, PROD_TEXT)
+    _assert_query_open_prod(tab)
     fake.firmware_kind.emit("unknown")
     _assert_query_locked(tab, UNKNOWN_TEXT)
 
@@ -137,11 +144,16 @@ def test_scanner_locked_when_unknown(qapp, db):
     _assert_scanner_locked(tab, UNKNOWN_TEXT)
 
 
-def test_scanner_locked_when_prod(qapp, db):
+def test_scanner_open_when_prod_without_format_and_delay(qapp, db):
     fake = FakeBridge()
     tab = tab_scanner.ScannerTab(db, fake)
     fake.firmware_kind.emit("prod")
-    _assert_scanner_locked(tab, PROD_TEXT)
+    # Produktiv: Start und Eingaben offen, Format und Pause gesperrt (Tooltip erklaert es)
+    assert all(w.isEnabled() for w in _scanner_controls(tab) if w not in (tab._format, tab._delay))
+    assert not tab._format.isEnabled()
+    assert not tab._delay.isEnabled()
+    assert tab._fw_label.isHidden()
+    assert tab._fw_label.text() == ""
 
 
 def test_scanner_open_when_debug(qapp, db):
@@ -149,8 +161,8 @@ def test_scanner_open_when_debug(qapp, db):
     tab = tab_scanner.ScannerTab(db, fake)
     fake.firmware_kind.emit("debug")
     _assert_scanner_open(tab)
-    fake.firmware_kind.emit("prod")
-    _assert_scanner_locked(tab, PROD_TEXT)
+    fake.firmware_kind.emit("unknown")
+    _assert_scanner_locked(tab, UNKNOWN_TEXT)
 
 
 def test_scanner_stop_stays_usable_while_scanning(qapp, db):
@@ -164,7 +176,8 @@ def test_scanner_stop_stays_usable_while_scanning(qapp, db):
     assert not tab._start_btn.isEnabled()
     assert tab._stop_btn.isEnabled()
     tab._on_stop()
-    assert all(not w.isEnabled() for w in _scanner_controls(tab))  # prod: gesperrt
+    assert tab._start_btn.isEnabled()  # prod: Start wieder offen
+    assert not tab._format.isEnabled()  # prod: Format bleibt gesperrt
     assert not tab._stop_btn.isEnabled()
 
 

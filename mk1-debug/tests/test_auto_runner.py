@@ -654,3 +654,432 @@ def test_rx_item_ts_from_u_only_when_positive():
     assert "ts" not in frames[2]
     assert transport._rx.getvalue().count("\n") == 3
     assert '"u":1700000000123' in transport._rx.getvalue()
+
+
+# ----------------------------------------------------------------------
+# Produktiv-Modus (--fw prod): Fake-Transport mit publish_text()
+# ----------------------------------------------------------------------
+import prod_api as pa  # noqa: E402
+
+ID_BY_NAME = {name: can_id for name, can_id in pa.PROD_MEMBERS}
+PROD_FAST = ar.Timing(passive_s=0, gap_s=0, online_wait_s=0.5, stall_s=0.5,
+                      read_timeout_s=0.5, reread_gap_s=0, busy_pause_s=0)
+SMOKE_STARTS = ["KESSEL 0x0000 0x001f", "SPEICHER 0x0000 0x001f",
+                "KESSEL 0x00f8 0x0102", "SPEICHER 0x00f8 0x0102"]
+
+
+def _status(state, mode, member):
+    return {"state": state, "mode": mode, "member": member,
+            "done": 0, "total": 0, "hits": 0, "seconds": 0}
+
+
+class ProdFake:
+    """Produktiv-API ohne Broker: publish_text() antwortet wie die Firmware (Events in die Queue).
+
+    Je Scan wie Firmware: running, Treffer, done. stale: Altlasten (retained), die vor dem
+    eigenen running eintreffen. Es gibt kein publish(): der Produktiv-Modus nutzt nur publish_text.
+    """
+
+    def __init__(self, members=(0x180, 0x201), silent=(0x100,), scan_answers=None,
+                 online=True, unsupported=(), busy_reads=0, silent_reads=False,
+                 minmax=None, stale=(), offline_on_first_scan=False):
+        self.members = list(members)
+        self.silent = list(silent)
+        self.scan_answers = set(self.members if scan_answers is None else scan_answers)
+        self.unsupported = set(unsupported)
+        self.busy_reads = busy_reads
+        self.silent_reads = silent_reads
+        self.minmax = dict(minmax or {})
+        self.stale = list(stale)
+        self.offline_on_first_scan = offline_on_first_scan
+        self.scan_calls = 0
+        self.q: deque = deque()
+        if online:
+            self.q.append(("availability", "online"))
+        self.sent: list[tuple[str, str]] = []
+
+    def publish_text(self, topic, text):
+        self.sent.append((topic, text))
+        if topic == pa.TOPIC_CAN_DEBUG_SET and text == "on":
+            frames = [{"t": 1, "id": i, "data": bytes(7), "tx": False}
+                      for i in self.members + self.silent]
+            frames.append({"t": 2, "id": 0x680, "data": bytes(7), "tx": True})
+            self.q.append(("rx", frames))
+        elif topic == pa.TOPIC_SCAN_MEMBERS:
+            self._members_scan(text)
+        elif topic == pa.TOPIC_SCAN_START:
+            self._scan_start(text)
+        elif topic == pa.TOPIC_RAW_READ:
+            self._raw_read(text)
+
+    def _members_scan(self, text):
+        lo, hi, idx = (int(tok, 16) for tok in text.split())
+        self.q.extend(self.stale)
+        self.q.append(("scan/status", _status("running", "members", "")))
+        for m in self.members:
+            if lo <= m <= hi:
+                raw = 0x8000 if m in self.unsupported else 0x0001
+                self.q.append(("scan/member", {"id": m, "index": idx, "raw": raw}))
+        self.q.append(("scan/status", _status("done", "members", "")))
+
+    def _scan_start(self, text):
+        tokens = text.split()
+        name = tokens[0]
+        member = ID_BY_NAME[name] if name in ID_BY_NAME else int(name, 16)
+        lo, hi = int(tokens[1], 16), int(tokens[2], 16)
+        sw = int(tokens[3], 16) if len(tokens) > 3 else 0xFA
+        self.scan_calls += 1
+        if self.offline_on_first_scan and self.scan_calls == 1:
+            self.q.append(("availability", "offline"))
+            self.q.append(("availability", "online"))
+            return
+        self.q.extend(self.stale)
+        self.q.append(("scan/status", _status("running", "range", name)))
+        if member in self.scan_answers:
+            for i in range(lo, hi + 1):
+                if i % 2 == 0:  # Firmware meldet nur Antworten != 0x8000
+                    self.q.append(("scan/hit", {"name": name, "index": i, "switch": sw,
+                                                "raw": 1, "value": "1"}))
+        self.q.append(("scan/status", _status("done", "range", name)))
+
+    def _raw_read(self, text):
+        if self.silent_reads:
+            return
+        tokens = text.split()
+        mid, idx = int(tokens[0], 16), int(tokens[1], 16)
+        sw = int(tokens[2], 16) if len(tokens) > 2 else 0xFA
+        base = {"op": "read", "id": mid, "index": idx, "switch": sw}
+        if self.busy_reads > 0:
+            self.busy_reads -= 1
+            self.q.append(("raw/result", dict(base, raw=None, status="busy")))
+            return
+        self.q.append(("raw/result", dict(base, raw=self.minmax.get((mid, idx, sw), 1),
+                                          status="ok")))
+
+    def poll(self, timeout):
+        if not self.q:
+            time.sleep(min(max(timeout, 0.0), 0.001))
+            return []
+        out = list(self.q)
+        self.q.clear()
+        return out
+
+    def close(self):
+        pass
+
+    def texts(self, topic):
+        return [t for s, t in self.sent if s == topic]
+
+
+def run_prod(tmp_path, fake, *, smoke=True, delay_ms=100, stages=None, minmax=False,
+             name="prod_t", timing=PROD_FAST):
+    buf = io.StringIO()
+    state = ar.new_state(delay_ms, smoke, ar.FW_PROD)
+    state_path = tmp_path / f"{name}_state.json"
+    runner = ar.Runner(fake, state, state_path=str(state_path), timing=timing,
+                       log=make_log(buf), smoke=smoke, delay_ms=delay_ms, minmax=minmax,
+                       prod=True)
+    if stages is not None:
+        runner.stages = stages
+    code = runner.execute()
+    return code, ar.load_state(str(state_path)), buf
+
+
+def test_cli_fw_option():
+    assert ar.build_parser().parse_args(["--out", "x"]).fw == "debug"
+    assert ar.build_parser().parse_args(["--out", "x", "--fw", "prod"]).fw == "prod"
+    assert ar.build_parser().parse_args(["--out", "x", "--fw", "debug"]).fw == "debug"
+    with pytest.raises(SystemExit):
+        ar.build_parser().parse_args(["--out", "x", "--fw", "other"])
+
+
+def test_new_state_fw_and_skipped_defaults():
+    assert ar.new_state(100, True)["fw"] == "debug"
+    assert ar.new_state(100, True)["skipped"] == []
+    assert ar.new_state(100, True, "prod")["fw"] == "prod"
+
+
+def test_prod_smoke_full_run(tmp_path):
+    fake = ProdFake()
+    code, saved, _ = run_prod(tmp_path, fake)
+    assert code == 0
+    assert saved["fw"] == "prod" and saved["finished"]
+    assert saved["passive_ids"] == ["0x100", "0x180", "0x201"]
+    assert saved["members"] == ["0x180", "0x201"]
+    assert saved["silent"] == ["0x100"]
+    assert [t["stage"] for t in saved["tasks"]] == ["S1", "S1", "S2", "S2"]
+    assert all(t["done"] for t in saved["tasks"])
+    assert saved["skipped"] == []
+    # Sniff, Probe und Scans nur ueber publish_text, exakte Payloads
+    assert fake.texts(pa.TOPIC_CAN_DEBUG_SET) == ["on", "off"]
+    assert fake.texts(pa.TOPIC_SCAN_MEMBERS) == ["0x170 0x210 0x000b"]
+    assert fake.texts(pa.TOPIC_SCAN_START) == SMOKE_STARTS
+    s1 = [t for t in saved["tasks"] if t["stage"] == "S1" and t["member"] == "0x180"][0]
+    assert [i["index"] for i in s1["items"]] == [ar.hex_index(i) for i in range(0, 0x20, 2)]
+    assert all(i["status"] == "ok" and i["raw"] == 1 for i in s1["items"])
+    # Rereads: je Treffer ein raw/read ohne Switch, raw als int
+    hits = ar.collect_hits(saved["tasks"])
+    assert len(saved["rereads"]) == len(hits)
+    assert all(r["raw"] == 1 and r["status"] == "ok" for r in saved["rereads"])
+    expected = {pa.raw_read_payload(ar.parse_hex(m), ar.parse_hex(i)) for m, i in hits}
+    assert set(fake.texts(pa.TOPIC_RAW_READ)) == expected
+    assert fake.sent[-1] == (pa.TOPIC_CAN_DEBUG_SET, "off")
+
+
+def test_prod_probe_maps_0x8000_to_unsupported(tmp_path):
+    code, saved, _ = run_prod(tmp_path, ProdFake(unsupported=(0x201,)))
+    assert code == 0
+    items = {i["id"]: i for i in saved["probe"]["items"]}
+    assert items["0x201"]["status"] == "unsupported" and items["0x201"]["raw"] == 0x8000
+    assert items["0x180"]["status"] == "ok" and items["0x180"]["raw"] == 1
+    assert saved["members"] == ["0x180", "0x201"]
+
+
+def test_prod_stage_a1_skipped_and_reported(tmp_path):
+    code, saved, buf = run_prod(tmp_path, ProdFake(), stages=CUSTOM_STAGES)
+    assert code == 0
+    a1 = [t for t in saved["tasks"] if t["stage"] == "A1"]
+    assert len(a1) >= 2 and all(t["done"] for t in a1)
+    assert all(t["skipped"] == ar.PROD_A1_SKIP for t in a1)
+    assert saved["skipped"] == [ar.PROD_A1_SKIP]  # ohne Duplikate
+    assert "uebersprungen" in buf.getvalue()
+    d = [t for t in saved["tasks"] if t["stage"] == "D" and t["member"] == "0x180"]
+    assert d and all(t["done"] for t in d)
+
+
+def test_prod_a1_range_never_sent(tmp_path):
+    fake = ProdFake()
+    code, _, _ = run_prod(tmp_path, fake, stages=CUSTOM_STAGES)
+    assert code == 0
+    starts = fake.texts(pa.TOPIC_SCAN_START)
+    assert not any(" 0x0000 0x000f" in s for s in starts)
+    assert "KESSEL 0x1000 0x100f" in starts
+
+
+def test_prod_delay_note_when_not_default(tmp_path):
+    code, saved, buf = run_prod(tmp_path, ProdFake(), delay_ms=250, name="prod_d")
+    assert code == 0
+    assert saved["skipped"] == [ar.PROD_DELAY_NOTE]
+    assert "delay_ms ignoriert" in buf.getvalue()
+
+
+def test_prod_default_delay_no_note(tmp_path):
+    code, saved, _ = run_prod(tmp_path, ProdFake(), delay_ms=100, name="prod_n")
+    assert code == 0
+    assert saved["skipped"] == []
+
+
+def test_prod_retained_altlasten_ignored_in_run(tmp_path):
+    stale = [
+        ("scan/status", _status("done", "range", "KESSEL")),  # altes done vor running
+        ("scan/hit", {"name": "KESSEL", "index": 1, "switch": 0xFA, "raw": 1, "value": "1"}),
+        ("scan/hit", {"name": "KESSEL", "index": 2, "switch": 0xF8, "raw": 1, "value": "1"}),
+        ("scan/hit", {"name": "BEDIENMODUL_1", "index": 2, "switch": 0xFA, "raw": 1,
+                      "value": "1"}),
+        ("scan/member", {"id": 0x500, "index": 0x0B, "raw": 1}),
+    ]
+    code, saved, _ = run_prod(tmp_path, ProdFake(stale=stale), smoke=True)
+    assert code == 0
+    # Scan lief voll durch (altes done beendet ihn nicht), keine Altlast-Treffer
+    s1 = [t for t in saved["tasks"] if t["stage"] == "S1" and t["member"] == "0x180"][0]
+    assert [i["index"] for i in s1["items"]] == [ar.hex_index(i) for i in range(0, 0x20, 2)]
+    assert all(t["done"] for t in saved["tasks"])
+    assert "0x500" not in [i["id"] for i in saved["probe"]["items"]]
+
+
+def test_prod_status_gating_unit():
+    runner = ar.Runner(None, ar.new_state(100, True, ar.FW_PROD), state_path="unused",
+                       timing=ar.Timing(), log=logging.getLogger("t-gate"), smoke=True,
+                       delay_ms=100, prod=True)
+    runner._prod_begin("range", "KESSEL", 0xFA)
+    runner._dispatch("scan/status", _status("done", "range", "KESSEL"))
+    assert not runner._prod_done  # ohne running ignoriert
+    runner._dispatch("scan/status", _status("running", "members", ""))
+    assert not runner._prod_armed  # falscher mode
+    runner._dispatch("scan/status", _status("running", "range", "SPEICHER"))
+    assert not runner._prod_armed  # falscher Name
+    runner._dispatch("scan/status", _status("running", "range", "kessel"))
+    assert runner._prod_armed  # Name case-insensitiv
+    runner._dispatch("scan/status", _status("done", "range", "KESSEL"))
+    assert runner._prod_done and runner._prod_expect is None and not runner._prod_armed
+
+
+def test_prod_hit_filter_name_and_switch_unit():
+    runner = ar.Runner(None, ar.new_state(100, True, ar.FW_PROD), state_path="unused",
+                       timing=ar.Timing(), log=logging.getLogger("t-hit"), smoke=True,
+                       delay_ms=100, prod=True)
+    runner._prod_begin("range", "KESSEL", 0xFA)
+    runner._dispatch("scan/hit", {"name": "KESSEL", "index": 4, "switch": 0xFA,
+                                  "raw": 1, "value": "1"})  # vor running
+    runner._dispatch("scan/status", _status("running", "range", "KESSEL"))
+    runner._dispatch("scan/hit", {"name": "SPEICHER", "index": 6, "switch": 0xFA,
+                                  "raw": 1, "value": "1"})
+    runner._dispatch("scan/hit", {"name": "KESSEL", "index": 8, "switch": 0xF8,
+                                  "raw": 1, "value": "1"})
+    runner._dispatch("scan/hit", {"name": "KESSEL", "index": 10, "switch": 0xFA,
+                                  "raw": 1, "value": "1"})
+    assert [h["index"] for h in runner._prod_hits] == [10]
+
+
+def test_prod_minmax_f8_f9_values_and_payloads(tmp_path):
+    fake = ProdFake(minmax={(0x180, 0x0002, 0xF8): 0x0010, (0x180, 0x0002, 0xF9): 0x0200})
+    code, saved, _ = run_prod(tmp_path, fake, smoke=True, minmax=True)
+    assert code == 0
+    entries = {(e["member"], e["index"], e["switch"]): e for e in saved["minmax"]}
+    assert entries[("0x180", "0x0002", "0xf8")]["raw"] == 0x0010
+    assert entries[("0x180", "0x0002", "0xf9")]["raw"] == 0x0200
+    assert all(e["status"] == "ok" and isinstance(e["raw"], int) for e in saved["minmax"])
+    raw_reads = fake.texts(pa.TOPIC_RAW_READ)
+    assert "0x180 0x0002 f8" in raw_reads and "0x180 0x0002 f9" in raw_reads
+    assert "0x180 0x0002" in raw_reads  # Reread ohne Switch
+    assert "0x180 0x0002 fa" not in raw_reads  # Standard-Switch ohne Feld
+
+
+def test_prod_busy_retried_once(tmp_path):
+    fake = ProdFake(busy_reads=1)
+    code, saved, _ = run_prod(tmp_path, fake, smoke=True)
+    assert code == 0
+    assert all(r["status"] == "ok" and r["raw"] == 1 for r in saved["rereads"])
+    reads = fake.texts(pa.TOPIC_RAW_READ)
+    assert reads[0] == reads[1]  # zweiter Versuch derselbe Read
+
+
+def test_prod_busy_twice_reports_busy(tmp_path):
+    fake = ProdFake(busy_reads=2)
+    code, saved, _ = run_prod(tmp_path, fake, smoke=True)
+    assert code == 0
+    first = saved["rereads"][0]
+    assert first["status"] == "busy" and first["raw"] is None
+    reads = fake.texts(pa.TOPIC_RAW_READ)
+    assert reads[0] == reads[1] and reads[1] != reads[2]
+    assert saved["rereads"][1]["status"] == "ok"
+
+
+def test_prod_read_timeout_gives_raw_none(tmp_path):
+    stages = (("A1", "short", ((0x0000, 0x000F),)), ("D", "auto", ((0x1000, 0x100F),)))
+    timing = ar.Timing(passive_s=0, gap_s=0, online_wait_s=0.5, stall_s=0.5,
+                       read_timeout_s=0.05, reread_gap_s=0, busy_pause_s=0)
+    code, saved, _ = run_prod(tmp_path, ProdFake(silent_reads=True), smoke=True,
+                              stages=stages, timing=timing)
+    assert code == 0
+    assert saved["rereads"]
+    assert all(r["raw"] is None and r["status"] == "timeout" for r in saved["rereads"])
+
+
+def test_prod_never_online_exit_2_and_stop_texts(tmp_path):
+    timing = ar.Timing(passive_s=0, gap_s=0, online_wait_s=0.2, stall_s=0.2,
+                       read_timeout_s=0.2, reread_gap_s=0, busy_pause_s=0)
+    fake = ProdFake(online=False)
+    code, _, _ = run_prod(tmp_path, fake, timing=timing)
+    assert code == 2
+    assert (pa.TOPIC_SCAN_STOP, "stop") in fake.sent
+    assert (pa.TOPIC_CAN_DEBUG_SET, "off") in fake.sent
+    assert fake.texts(pa.TOPIC_SCAN_START) == []
+
+
+def test_prod_offline_repeats_scan(tmp_path):
+    fake = ProdFake(offline_on_first_scan=True)
+    code, _, _ = run_prod(tmp_path, fake, smoke=True)
+    assert code == 0
+    starts = fake.texts(pa.TOPIC_SCAN_START)
+    assert len(starts) == 5 and starts[0] == starts[1]
+
+
+def test_prod_debug_path_unchanged(tmp_path):
+    # Debug-Lauf: nur publish() wie bisher, kein publish_text, state fw debug
+    code, state_path, _ = run_fake(tmp_path, FakeTransport(), smoke=True)
+    assert code == 0
+    saved = ar.load_state(str(state_path))
+    assert saved["fw"] == "debug" and saved["skipped"] == []
+    assert saved["passive_ids"] == ["0x100", "0x180", "0x201"]
+    assert [t["stage"] for t in saved["tasks"]] == ["S1", "S1", "S2", "S2"]
+    assert all(t["done"] and "skipped" not in t for t in saved["tasks"])
+
+
+def test_paho_prod_message_parsing():
+    import queue as _q
+    from types import SimpleNamespace
+
+    class _Client:
+        def __init__(self):
+            self.published = []
+
+        def publish(self, topic, payload, qos=0):
+            self.published.append((topic, payload, qos))
+
+    transport = object.__new__(ar.PahoTransport)
+    transport._prod = True
+    transport._rx = io.StringIO()
+    transport._log = logging.getLogger("test-paho-prod")
+    transport._queue = _q.Queue()
+    transport._client = _Client()
+
+    def feed(topic, text):
+        msg = SimpleNamespace(topic=topic, payload=text.encode("utf-8"))
+        transport._on_message(None, None, msg)
+
+    feed(pa.PROD_ROOT + "/status", "online")
+    feed(pa.TOPIC_SCAN_STATUS, json.dumps(_status("running", "range", "KESSEL")))
+    feed(pa.PROD_ROOT + "/scan/KESSEL/0x0010/f8", '{"name":"KESSEL","raw":1,"value":"x"}')
+    feed(pa.PROD_ROOT + "/scan/members/0x180", '{"index":"0x000b","raw":32768}')
+    feed(pa.TOPIC_RAW_RESULT, json.dumps({"op": "read", "id": "0x180", "index": "0x0013",
+                                          "switch": "fa", "raw": "0x0001", "status": "ok"}))
+    feed(pa.TOPIC_CAN_DEBUG_FRAMES, json.dumps([{"t": 1, "id": "180", "d": "3180100000",
+                                                 "tx": False}]))
+    feed(pa.TOPIC_SCAN_STATUS, "kaputt")  # ungueltiges JSON: kein Event
+    feed(pa.PROD_ROOT + "/scan/KESSEL/0x0010/f8", "")  # leere Retained-Nachricht: kein Event
+
+    events = []
+    while not transport._queue.empty():
+        events.append(transport._queue.get_nowait())
+    assert len(events) == 6
+    assert events[0] == ("availability", "online")
+    assert events[1] == ("scan/status", _status("running", "range", "KESSEL"))
+    assert events[2] == ("scan/hit", {"name": "KESSEL", "index": 0x10, "switch": 0xF8,
+                                      "raw": 1, "value": "x"})
+    assert events[3] == ("scan/member", {"id": 0x180, "index": 0x0B, "raw": 0x8000})
+    assert events[4][0] == "raw/result" and events[4][1]["raw"] == 1
+    assert events[5][0] == "rx" and events[5][1][0]["id"] == 0x180
+    assert '"id":"180"' in transport._rx.getvalue()
+
+
+def test_paho_subscriptions_and_publish_text():
+    class _Client:
+        def __init__(self):
+            self.published = []
+            self.subscribed = []
+
+        def publish(self, topic, payload, qos=0):
+            self.published.append((topic, payload, qos))
+
+        def subscribe(self, topic, qos=0):
+            self.subscribed.append(topic)
+
+    for prod, expected in ((True, list(ar.PROD_TOPICS)),
+                           (False, [ar.PREFIX + t for t in ar.RX_TOPICS])):
+        transport = object.__new__(ar.PahoTransport)
+        transport._prod = prod
+        transport._log = logging.getLogger("test-paho-sub")
+        transport._client = _Client()
+        transport._on_connect(transport._client, None, None, 0)
+        assert transport._client.subscribed == expected
+    assert pa.TOPIC_SCAN_WILDCARD in ar.PROD_TOPICS
+
+    transport = object.__new__(ar.PahoTransport)
+    transport._prod = True
+    transport._client = _Client()
+    transport.publish_text(pa.TOPIC_SCAN_STOP, "stop")
+    assert transport._client.published == [(pa.TOPIC_SCAN_STOP, "stop", 0)]
+
+
+def test_paho_debug_ignores_prod_topics():
+    import queue as _q
+    from types import SimpleNamespace
+
+    transport = object.__new__(ar.PahoTransport)
+    transport._rx = io.StringIO()
+    transport._log = logging.getLogger("test-paho-debug-ignore")
+    transport._queue = _q.Queue()
+    msg = SimpleNamespace(topic=pa.PROD_ROOT + "/status", payload=b"online")
+    transport._on_message(None, None, msg)
+    assert transport._queue.empty()

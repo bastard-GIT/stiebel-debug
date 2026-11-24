@@ -19,6 +19,8 @@ Funktionen:
 - Member-Probe: einen Index bei allen CAN-IDs abfragen
 - Schreiben mit Rücklesen (`cmd/write`, nur Debug-Firmware)
 
+Die Produktiv-Firmware (Topic-Wurzel `heatingpump/`) bietet eine eigene Bus-Analyse: Bus-Scan eines Members, Teilnehmer-Scan, Einzel-Read, Schreiben (nur mit Build-Schalter `can_raw_write`) und einen CAN-Frame-Stream. Die GUI spricht im Produktiv-Modus diese Topics an: die Tabs Abfrage und Scanner sind dort aktiv (mit eingeschränkten Optionen), der Scanner enthält zusätzlich die Teilnehmer-Suche. Details, Payloads und Einschränkungen: `INTERFACES.md`, Abschnitt 13.
+
 ## Ordnerstruktur
 
 ```
@@ -120,8 +122,8 @@ C:\temp\stiebel-Remote\.venv\Scripts\python.exe gui\elster_gui.py
 
 - **Verbinden:** Broker, Port und Benutzer eingeben. Das Passwort wird bei jedem Start abgefragt und nicht gespeichert.
 - **Tab Live:** Rohframes und dekodierte Werte. Filter nach CAN-ID, Nachrichtenart und Index/Name. Pause, Löschen, Autoscroll. Ansicht umschaltbar zwischen allen Frames und dem letzten Wert pro Index. Schaltfläche zum Senden der Sniffer-Filter an die Firmware. Bei der Produktiv-Firmware filtert die GUI selbst (die Firmware kennt keinen Filter) und zeigt den Sniffer-Zustand der Firmware an.
-- **Tab Abfrage:** Member aus der Liste wählen, Index per Hex oder Namenssuche angeben. Das Ergebnis wird dekodiert angezeigt, der Verlauf als Tabelle.
-- **Tab Scanner:** Member, Indexbereich und Pause (mindestens 100 ms, Standard 200 ms) eingeben. Start und Stopp, Fortschrittsanzeige, Trefferliste mit Namen aus der Referenz oder `UNK_0x…`.
+- **Tab Abfrage:** Member aus der Liste wählen, Index per Hex oder Namenssuche angeben. Das Ergebnis wird dekodiert angezeigt, der Verlauf als Tabelle. Im Produktiv-Modus aktiv, Absender, Timeout und Format sind dort deaktiviert. Schreiben nach Freischalten und Bestätigung; Status `rejected` erscheint als Warnung.
+- **Tab Scanner:** Member, Indexbereich und Pause (mindestens 100 ms, Standard 200 ms) eingeben. Start und Stopp, Fortschrittsanzeige, Trefferliste mit Namen aus der Referenz oder `UNK_0x…`. Im Produktiv-Modus aktiv (Takt fest 150 ms, Format und Pause deaktiviert), mit Hex-ID-Feld und Teilnehmer-Suche (`scan/members`).
 - **Tab Status:** Zähler aus dem Status-Topic (RX, TX, Füllstand des Ringpuffers, Überläufe, TWAI-Fehler, Bus-Off). Felder, die die Firmware nicht sendet (bei der Produktiv-Firmware fast alle außer RX und Heap), zeigt die Anzeige als `-`.
 - **Exporte:** Mitschnitt als CSV oder als Rohlog (JSON-Lines). Trefferliste des Scanners als CSV. Abgleich mit der Referenz: bekannt, unbekannt oder anderer Typ.
 - **Offline-Log:** Über Menü Datei → Offline-Log laden kann ein gespeichertes Rohlog ohne Verbindung dekodiert angezeigt werden.
@@ -153,26 +155,24 @@ Details zu Feldern, Status-Werten und Regeln: `INTERFACES.md`, Abschnitte 1, 7.2
 
 ### Produktiv-Firmware
 
-Topic-Wurzel `heatingpump/` (Konstante `PROD_ROOT` in `gui/mqtt_client.py`). Die GUI erkennt die Firmware-Art am Feld `fw` in `stiebel-debug/status` (fehlt es, gilt `prod`).
+Topic-Wurzel `heatingpump/` (Konstante `PROD_ROOT` in `gui/prod_api.py`). Die GUI erkennt die Firmware-Art am Feld `fw` in `stiebel-debug/status` (fehlt es, gilt `prod`).
 
-| Topic | Richtung | Inhalt |
-|---|---|---|
-| `heatingpump/status` | ESP → GUI | `online` / `offline` (Verfügbarkeit) |
-| `heatingpump/can_debug/set` | GUI → ESP | `on` / `off` – Sniffer an/aus, kein Filter |
-| `heatingpump/can_debug/state` | ESP → GUI | `on` / `off` (retained) – Zustand des Sniffers |
-| `heatingpump/can_debug/frames` | ESP → GUI | Batch wie `rx`, aber ohne `u`: `[{"t":123456,"id":"0x180","d":"d200fa01120200","tx":false}]` |
-| `heatingpump/scan/start` | GUI → ESP | `MEMBER` oder `MEMBER 0xLO 0xHI` – Bus-Scan eines Members |
-| `heatingpump/scan/stop` | GUI → ESP | beliebig – Scan abbrechen |
-| `heatingpump/scan/status` | ESP → GUI | `{"state":"running|done|stopped","member":"…","done":…,"total":…,"hits":…,"seconds":…}` |
-| `heatingpump/scan/<MEMBER>/0x<idx>` | ESP → GUI | `{"name":"…","raw":…,"value":"…"}` (retained), nur Indizes mit Antwort |
+| Funktion | Topics |
+|---|---|
+| Verfügbarkeit | `heatingpump/status` (`online` / `offline`) |
+| CAN-Frame-Stream | `heatingpump/can_debug/set`, `state` (retained), `frames` |
+| Bus-Scan eines Members oder einer CAN-ID | `heatingpump/scan/start`, `scan/stop`, `scan/status` (retained), `scan/<name>/0x<idx>` (retained) |
+| Teilnehmer-Scan | `heatingpump/scan/members`, `scan/members/0x<id>` (retained) |
+| Einzel-Read, Schreiben | `heatingpump/raw/read`, `raw/write`, `raw/result` (nicht retained) |
 
-Im Produktiv-Modus gilt der Filter (CAN-ID, Art) nur in der GUI. Die Zeitstempel stammen aus der Schätzung über `t` (`ts_src` = `pc`). Der Sniffer ist nur aktiv, wenn die Firmware mit `can_debug: "true"` gebaut wurde (Mk1: ja). Die `cmd/*`-Kommandos gibt es in der Produktiv-Firmware noch nicht; das ist geplant. Die GUI nutzt die Produktiv-Topics für Scan und `cmd/*` noch nicht. Details: `INTERFACES.md`, Abschnitte 8.7 und 13.
+Welche Topics mit welchem Build-Schalter gelten, Payloads, Status-Werte und Einschränkungen im Produktiv-Modus (Tabelle je GUI-Funktion, Auto-Runner `--fw prod`): `INTERFACES.md`, Abschnitt 13. Die Sniffer-Details stehen in Abschnitt 8.7.
 
-Status-Werte in `read/result` und `scan/result`: `ok`, `unsupported` (Rohwert `0x8000`), `timeout`.
+Im Produktiv-Modus filtert die GUI den CAN-Frame-Stream selbst (CAN-ID, Art). Der Sniffer ist nur aktiv, wenn die Firmware mit `can_debug: "true"` gebaut wurde (Mk1: ja). Schreiben über `raw/write` braucht zusätzlich `can_raw_write: "true"` (Mk1: aus).
 
 ## Sicherheitshinweise
 
 - **Schreiben nur gezielt.** `cmd/write` gibt es nur in der Debug-Firmware. Die Firmware schreibt nur im Leerlauf, nur an Ziele 0x000–0x7FF außer 0x680, und Index 0xF7–0xFA mit Wert 0x8000 wird nicht gesendet. Das Ergebnis steht in `write/result` (`verified`, `mismatch`, `no_ack`, `timeout`, `rejected`). Ablauf und Regeln: `INTERFACES.md`, Abschnitt 10.
+- **Produktiv-Schreiben (`raw/write`) nur mit Build-Schalter `can_raw_write: "true"`.** Dann kann jeder MQTT-Client mit Broker-Zugang beliebige Werte an beliebige CAN-IDs schreiben, ohne Whitelist. Auf Mk1 ist der Schalter aus. Ohne Schalter antwortet die Firmware mit `rejected`. Details: `INTERFACES.md`, Abschnitt 13.4.
 - **Mindestabstand 100 ms** zwischen zwei gesendeten Requests. Ein `delay_ms` unter 100 wird auf 100 angehoben.
 - **`secrets.yaml` nie committen.** Die Datei enthält MQTT-Zugang und API-Schlüssel.
 - **Keine Zugangsdaten im README** oder in anderen Dokumenten dieses Ordners.

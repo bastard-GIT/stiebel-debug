@@ -299,7 +299,7 @@ Beispiel `BETRIEBS_STATUS_WPLA` (Index `0x4eef`, Owner `0x480`, Typ `et_default`
 
 ## 10. Schreiben (cmd/write)
 
-Nur Debug-Firmware. Die Produktiv-Firmware hat keinen Schreibweg.
+Nur Debug-Firmware (`cmd/write`). Die Produktiv-Firmware schreibt nur über `heatingpump/raw/write`, und nur mit Build-Schalter `can_raw_write` (Abschnitt 13.4).
 
 ### 10.1 Payload `cmd/write` (GUI→ESP)
 `{"member":"0x201","index":"0x0013","value":"0x0208","format":"auto"}`
@@ -370,32 +370,122 @@ Art 0 (`d0 & 0x0F == 0`), Absender 0x680, DLC 7. `d0 = ((id >> 3) & 0xF0) | 0x00
 
 ## 13. Produktiv-Modus (Topic-Wurzel `heatingpump/`)
 
-Gilt für die Produktiv-Firmware (`esp32-s3-technik-mk1`). Die Topic-Wurzel steht in `PROD_ROOT` in `gui/mqtt_client.py`. Quellen: Fork `bastard-GIT/ha-stiebel-control`, Branch `wpla07-modular` (`esphome/ha-stiebel-control/bus_scan.h`, `can_debug.h`, `can_members.h`) und `upstream/main` (`bus_scan.h` identisch, `docs/CONFIGURATION.md`, Abschnitt Bus scan). Stand 2026-11-23.
+Gilt für die Produktiv-Firmware (`esp32-s3-technik-mk1`). Die Topic-Wurzel ist `PROD_ROOT = "heatingpump"` in `gui/prod_api.py` (dort auch Payload-Bau und Antwort-Parser) und in `gui/mqtt_client.py` übernommen.
 
-### 13.1 Bus-Scan (vorhanden)
+Quelle der Firmware-Seite: PR #141 im Fork `bastard-GIT/ha-stiebel-control` (Branch `feat/bus-analysis`, Dateien `esphome/ha-stiebel-control/bus_scan.h`, `can_raw.h`, `can_debug.h`, `common.yaml`; Doku `docs/CONFIGURATION.md`, Abschnitt "Bus analysis"). Die Upstream-PR ist ein Draft. Stand 2026-11-24. Welche Firmware auf dem Mk1 läuft und ob sie diesen Stand enthält, steht im Tag, nicht in diesem Abschnitt.
 
-Fragt einen Member nach allen Indizes der Tabelle ab (ca. 3 760 Indizes, ca. 9,5 min bei 150 ms) oder nach einem Bereich.
+### 13.0 Bau-Optionen
+
+| Funktion | Build-Schalter (`common.yaml`) | Topics |
+|---|---|---|
+| Bus-Scan | Standard, immer eingebaut | `scan/start`, `scan/stop`, `scan/status`, `scan/<name>/0x<idx>` |
+| Teilnehmer-Scan | `can_debug: "true"` | `scan/members`, `scan/members/0x<id>` |
+| Einzel-Read | `can_debug: "true"` | `raw/read`, `raw/result` |
+| Schreiben | `can_debug: "true"` und `can_raw_write: "true"` | `raw/write`, `raw/result` |
+| CAN-Frame-Stream | `can_debug: "true"` | `can_debug/set`, `can_debug/state`, `can_debug/frames` |
+
+Ohne Schalter loggt die Firmware nur, dass die Funktion nicht eingebaut ist. Mk1 (Produktiv-YAML): `can_debug: "true"`, `can_raw_write: "false"`.
+
+### 13.1 Bus-Scan (`scan/*`)
+
+Fragt einen Member (oder eine CAN-ID) nach Indizes ab, entweder über die ganze Signaltabelle oder über einen Hex-Bereich. Veröffentlicht werden nur Indizes, die antworten.
 
 | Topic | Richtung | Payload |
 |---|---|---|
-| `heatingpump/scan/start` | GUI/HA → ESP | `MEMBER` (alle Tabellenindizes) oder `MEMBER 0xLO 0xHI` (Bereich) |
-| `heatingpump/scan/stop` | GUI/HA → ESP | beliebig |
-| `heatingpump/scan/status` | ESP → | `{"state":"running|done|stopped","member":"…","done":…,"total":…,"hits":…,"seconds":…}` (retained) |
-| `heatingpump/scan/<MEMBER>/0x<idx>` | ESP → | `{"name":"…","raw":…,"value":"…"}` (retained) |
+| `heatingpump/scan/start` | GUI/HA → ESP | `MEMBER\|0xID [0xLO 0xHI] [fa\|f8\|f9]` |
+| `heatingpump/scan/stop` | GUI/HA → ESP | beliebig, bricht sofort ab |
+| `heatingpump/scan/status` | ESP → | `{"state":"running\|done\|stopped","mode":"table\|range\|members","member":"…","done":…,"total":…,"hits":…,"seconds":…}`, retained |
+| `heatingpump/scan/<name>/0x<idx>` | ESP → | `{"name":"…","raw":…,"value":"…"}`, retained |
+| `heatingpump/scan/<name>/0x<idx>/f8`, `/f9` | ESP → | wie oben, für die Schalterbytes Minimum und Maximum |
 
 Regeln:
-- `MEMBER` ist ein Name aus `CanMembers` (`can_members.h`), Groß-/Kleinschreibung egal. Beispiele: MANAGER, KESSEL, HEIZMODUL, WPUMPE, SPEICHER, FES, OTHER. `PC` wird abgelehnt. Im WPL-A-Build (`HA_CONTROLLER_WPLA`) heißen 0x514 `WPUMPE` und 0x201 `SPEICHER`, sonst `HEIZMODUL_WPL` und `KESSEL_CANB`.
-- Bereich: Hex mit oder ohne `0x`, Ende inklusive, `HI` ≥ `LO`, maximal `0xFFFF`. Unbekannter Name oder `HI` < `LO` → Log-Warnung, nichts startet. Ein einzelner Wert hinter dem Member wird ignoriert, dann läuft ein Tabellenscan.
-- Takt fest 150 ms (`SCAN_GAP_MS`), eine Anfrage je Index. Normales Polling pausiert während des Scans (Request-Manager und Fehlerliste).
-- Ende: nach dem letzten Index 1 s Nachlauf (`SCAN_TAIL_MS`), dann `done`. `stop` → sofort `stopped`.
-- `scan/status`: `running` beim Start, danach alle 100 Indizes, zuletzt `done` oder `stopped`. `done` = abgefragte Indizes, `total` = Anzahl, `hits` = Treffer, `seconds` = Dauer.
-- Ergebnisse gehen sofort einzeln raus, nicht gesammelt. Veröffentlicht werden nur Antworten mit Rohwert ≠ `0x8000`. Ausbleibende Antworten (Timeout) werden nicht gemeldet. `raw` ist eine Dezimalzahl (`%u`), nicht ein Hex-String. `name` ist leer, wenn der Index nicht in der Tabelle steht (nur Bereichsscan). `value` ist der dekodierte Wert als Text.
+- `MEMBER`: Name aus der Mitgliederliste (Groß-/Kleinschreibung egal, PC ausgenommen) oder Hex-CAN-ID `0x000`–`0x7FF` (nicht `0x680`). Eine Hex-ID aus der Tabelle scannt den Member unter seinem Namen. Jede andere Hex-ID scannt das Ziel und veröffentlicht unter `0x%03x` (klein).
+- Ohne Bereich läuft die ganze Signaltabelle (ca. 3 600 Indizes, ca. 9 min bei 150 ms), auch bei einer Hex-ID.
+- Bereich: genau zwei Hex-Zahlen `LO HI`, jede höchstens `0xFFFF`, `HI >= LO`. Er ersetzt die Tabelle.
+- Schalterbyte: `fa` (Standard, Wert), `f8` (Minimum), `f9` (Maximum). Höchstens eines, an beliebiger Stelle.
+- Ungültige Payload: nur Log, nichts ändert sich. Ein gültiger Start ersetzt einen laufenden Scan.
+- Takt fest 150 ms je Anfrage. Das normale Polling pausiert während des Scans.
+- Ende: 1 s Nachlauf nach dem letzten Index, dann `done`. `stop` führt sofort zu `stopped`.
+- `scan/status` kommt beim Start, danach alle 100 Anfragen und am Ende. `done` = Anfragen bisher, `total` = Anzahl, `hits` = Treffer, `seconds` = Dauer. `member` ist im Modus `members` leer.
+- Ergebnisse gehen einzeln und sofort raus, nicht gesammelt. Nur Antworten mit Rohwert ≠ `0x8000` werden veröffentlicht. Ausbleibende Antworten (Timeout) werden nicht gemeldet.
+- `raw` ist eine Dezimalzahl, kein Hex-String. `name` kommt aus der Tabelle und ist leer für Indizes ohne Tabelleneintrag. `value` ist der dekodierte Wert als Text.
 
-### 13.2 Sniffer `can_debug` (vorhanden, Opt-in)
+```
+mosquitto_pub -h <broker> -u <user> -P <passwort> -t heatingpump/scan/start -m "MANAGER 0xfd00 0xfdff"
+mosquitto_pub -h <broker> -u <user> -P <passwort> -t heatingpump/scan/start -m "0x180 0x0000 0x00ff f8"
+mosquitto_pub -h <broker> -u <user> -P <passwort> -t heatingpump/scan/stop -m stop
+```
 
-- Build-Schalter: Substitution `can_debug` (Standard `"false"`, Mk1 `"true"`). `can_debug_queue_size` (Standard 256 Frames, 16 Byte je Frame, nur solange der Sniffer an ist).
-- `set` ist nicht gespeichert: nach einem Neustart ist der Sniffer aus. `on` startet mit leerer Queue, `off` gibt den Speicher frei.
-- Frames enthalten RX und vom ESP gesendete Frames (`tx: true`). Ohne `u`. Kein Filter in der Firmware (Filter nur in der GUI, Abschnitt 8.7).
+### 13.2 Teilnehmer-Scan (`scan/members`)
+
+Fragt jede CAN-ID eines Bereichs nach einem Index (nur Schalterbyte `fa`) und meldet die Antworten.
+
+| Topic | Richtung | Payload |
+|---|---|---|
+| `heatingpump/scan/members` | GUI/HA → ESP | `[0xLO 0xHI] [0xIDX]`, Standard `0x000 0x7ff 0x000b` |
+| `heatingpump/scan/members/0x<id>` | ESP → | `{"index":"0x<idx>","raw":<dezimal>}`, retained |
+
+- Ohne Angabe: alle IDs `0x000`–`0x7FF`, Index `0x000b`. Ein Wert: Index. Zwei Werte: Bereich. Drei Werte: Bereich und Index.
+- Die eigene ID (`0x680`) wird übersprungen. Der volle Bereich dauert ca. 310 s (2 048 × 150 ms).
+- Fortschritt und Ende stehen auf `scan/status` mit `mode` `members`.
+- Nur mit `can_debug: "true"`.
+
+```
+mosquitto_pub -h <broker> -u <user> -P <passwort> -t heatingpump/scan/members -m "0x100 0x1ff 0x0013"
+```
+
+### 13.3 Einzel-Read (`raw/read`)
+
+Liest einen Index bei einer CAN-ID mit Schalterbyte `fa` (Standard), `f8` oder `f9`.
+
+| Topic | Richtung | Payload |
+|---|---|---|
+| `heatingpump/raw/read` | GUI/HA → ESP | `0xID 0xIDX [fa\|f8\|f9]` |
+| `heatingpump/raw/result` | ESP → | ein JSON-Objekt je Operation, nicht retained |
+
+Beispiel: `{"op":"read","id":"0x180","index":"0x0013","switch":"fa","raw":"0x0208","status":"ok"}`
+
+| `status` | Bedeutung | Feld `raw` |
+|---|---|---|
+| `ok` | Antwort mit Wert | ja |
+| `unsupported` | Antwort mit Rohwert `0x8000` | ja (`"0x8000"`) |
+| `timeout` | keine Antwort innerhalb 1 s | nein |
+| `busy` | Bus-Scan, andere Raw-Operation oder passiver Modus läuft | nein |
+
+- Eine Operation gleichzeitig. Die Antwort auf `raw/read` ist nicht retained.
+- Ungültige Payload oder Read der eigenen ID (`0x680`): nur Log, keine Antwort.
+- Nur mit `can_debug: "true"`.
+
+### 13.4 Schreiben (`raw/write`)
+
+Schreibt einen Index bei einer CAN-ID und prüft das Ergebnis per Rücklesen. Nur mit `can_debug: "true"` und `can_raw_write: "true"`.
+
+| Topic | Richtung | Payload |
+|---|---|---|
+| `heatingpump/raw/write` | GUI/HA → ESP | `0xID 0xIDX 0xVALUE` |
+| `heatingpump/raw/result` | ESP → | ein JSON-Objekt je Operation, nicht retained |
+
+> **Sicherheit:** Mit `can_raw_write: "true"` kann jeder MQTT-Client mit Broker-Zugang beliebige Werte an beliebige CAN-IDs schreiben. Es gibt keine Whitelist. Auf Mk1 ist der Schalter aus (`"false"`). Ein Wechsel ist eine Build-Änderung und braucht einen Flash.
+
+Ablauf: Der Schreibrahmen geht an das Ziel. Danach folgt ein Ack-Fenster von 1 s. Ein Ack-Rahmen vom Typ 3, 4 oder 5 bzw. eine Typ-2-Antwort auf denselben Index wird als `ack` (Nachrichtentyp) vermerkt. Dann wird der Index mit Schalterbyte `fa` zurückgelesen (Timeout 1 s).
+
+Beispiel: `{"op":"write","id":"0x180","index":"0x0013","value":"0x0208","status":"verified","ack":4,"readback":"0x0208"}`
+
+| `status` | Bedeutung |
+|---|---|
+| `verified` | Rücklesewert entspricht dem Schreibwert |
+| `mismatch` | Rücklesewert weicht ab |
+| `timeout` | Ack empfangen, kein Rücklesewert (Rücklesewert `0x8000` zählt als kein Wert) |
+| `no_ack` | weder Ack noch Rücklesewert |
+| `rejected` | nichts gesendet: Firmware ohne `can_raw_write`, Schreiben an die eigene ID (`0x680`), `read_only`-Build, Index `0xF7`–`0xFA` mit Wert `0x8000`, oder ein anderer Vorgang läuft (`busy`-Fall) |
+
+Bei `rejected` ist `ack` und `readback` nicht gesetzt.
+
+### 13.5 CAN-Frame-Stream (`can_debug/*`)
+
+- Schalter `can_debug` (Mk1: `"true"`). `can_debug_queue_size` (Standard 256 Frames, 16 Byte je Frame, nur solange der Stream an ist).
+- `set` wird nicht gespeichert: nach einem Neustart ist der Stream aus. `on` startet mit leerer Queue, `off` gibt den Speicher frei.
+- Frames enthalten RX und vom ESP gesendete Frames (`tx: true`). Kein Feld `u`. Kein Filter in der Firmware.
 
 | Topic | Richtung | Payload |
 |---|---|---|
@@ -405,10 +495,33 @@ Regeln:
 
 Andere Werte bei `set` werden nur geloggt.
 
-### 13.3 Kommandos cmd/* in der Produktiv-Firmware (geplant)
+### 13.6 GUI-Funktionen im Produktiv-Modus
 
-- Geplant: Die Produktiv-Firmware bekommt optional die Kommandos `stiebel-debug/cmd/read|scan|probe|stop|write` der Debug-Firmware. Payload und Antworten bleiben gleich (Abschnitte 1, 7.2, 10).
-- Geplante Schalter: `debug_can_tools` (read, scan, probe, stop) und `debug_can_write` (write). Standard aus. Mk1 geplant: tools an, write aus.
-- Geplant: `stiebel-debug/status` meldet dann `"tools":true|false` und `"write":true|false`.
-- Noch nicht umgesetzt. Die GUI nutzt die Produktiv-Topics für Scan und Befehle noch nicht und sendet weiter an `stiebel-debug/cmd/*`. Umstellung folgt. Der Sniffer ist bereits umgestellt (Abschnitt 8.7).
-- Bestand (Mk1): Substitution `debug_can_status` (Mk1 `"true"`) schaltet `stiebel-debug/status` ab.
+Die GUI wählt die Topic-Wurzel über die Firmware-Art (Feld `fw` in `stiebel-debug/status`, fehlt es, gilt `prod`).
+
+| GUI-Funktion | Topic | Einschränkung im Produktiv-Modus |
+|---|---|---|
+| Abfrage Read | `raw/read` | Tab Abfrage aktiv (`tab_query.py`, `_apply_lock`). Absender (`src`), Timeout und Format sind deaktiviert (Tooltip); fest gilt Absender `0x680`, Format `auto`, Timeout 1 s. Status `busy` wird angezeigt, ohne Wert. |
+| Abfrage Write | `raw/write` | Tab Abfrage aktiv nach Freischalten und Bestätigungsdialog (Zusatzzeile Produktiv). Bridge (`send_write`) nur mit Format `auto`. Status `rejected` (Firmware ohne `can_raw_write` oder Sperrregel) erscheint als rote Warnung. |
+| Scanner (Bereichs-Scan) | `scan/start` (mit Bereich) | Tab Scanner aktiv (`tab_scanner.py`): Member per Auswahl oder Hex-ID, Bereich, Schaltbyte. Unbekannte Hex-ID: Topic-Name `0x%03x`. Format und Pause deaktiviert (Tooltip), Takt fest 150 ms (`delay_ms` entfällt). |
+| Teilnehmer-Suche | `scan/members` | Tab Scanner, Gruppe "Teilnehmer-Suche (Produktiv)": ID-Bereich, Index (Standard `0x000b`), Suchen/Stopp, Fortschritt, Tabelle ID/Name/Index/Rohwert, CSV-Export. Doppelklick übernimmt die ID ins Feld "oder Hex-ID". Bereichs-Scan und Teilnehmer-Suche sperren sich gegenseitig. Auch im Auto-Runner (`--fw prod`). |
+| Auto-Runner `--fw prod` | `scan/start`, `scan/members`, `raw/read`, `raw/result` | Stufe A1 (Format `short`) wird übersprungen und in `state["skipped"]` vermerkt. `delay_ms` wird ignoriert (ebenfalls in `state["skipped"]`). Die Teilnehmer-Suche nutzt `scan/members`. |
+| Live-Sniffer | `can_debug/set`, `state`, `frames` | Filter (CAN-ID, Art) nur in der GUI. Die Firmware sendet ungefiltert. Frames vor einer Filteränderung fehlen. |
+| Tab Status | `stiebel-debug/status` | Die Produktiv-Firmware sendet nur `fw`, `rx`, `heap`, `ntp` und bei TWAI die Fehlerzähler. Fehlende Felder zeigt die Anzeige als `-`. |
+
+### 13.7 Nicht verfügbar im Produktiv-Modus
+
+- Read mit fremder Absender-ID `src` (`cmd/read` "src"). Standard-Absender ist `0x680`.
+- `delay_ms` im Scan. Der Takt ist fest 150 ms.
+- Format `short` und `long`. Die Produktiv-Firmware kennt nur das Format `auto`.
+- `timeout_ms` beim Read. Die Antwortzeit ist fest 1 s. Für langsame Teilnehmer (FES 0x100 braucht laut GUI-Hinweis 0,5–1,5 s) reicht das nicht.
+- Ein eigener Probe-Befehl (`cmd/probe`). Die Teilnehmer-Suche mit beliebigem Index läuft nur über `scan/members` (Schalterbyte `fa`).
+- Die Debug-Befehle `stiebel-debug/cmd/read|scan|probe|stop|write`. Ihre Funktionen stehen über `heatingpump/scan/*` und `heatingpump/raw/*` bereit (Abschnitte 13.1–13.4).
+- Status-Felder `rx_fill`, `rx_cap`, `overflow`. Die Produktiv-Firmware sendet sie nicht.
+
+### 13.8 Retained-Altlasten
+
+- `scan/status`, `scan/<name>/0x<idx>` und `scan/members/0x<id>` sind retained. Nach Scan-Ende bleiben sie auf dem Broker liegen, auch ein `scan/status` mit `running` nach einem Neustart.
+- Die Bridge (`mqtt_client.py`) wertet Scan-Ergebnisse nur aus, wenn sie selbst einen Scan gestartet hat und `scan/status` `running` gemeldet hat. Alles andere wird verworfen und in `stale_ignored` gezählt.
+- Der Auto-Runner wertet `scan/status`, Treffer und Member-Antworten nur nach eigenem Start und nach `running` aus. Alte Einträge werden ignoriert.
+- Zum Entfernen alter Einträge kann auf das Topic eine retained Nachricht mit leerem Payload gesendet werden (Broker-Standard). Das ist nicht getestet.

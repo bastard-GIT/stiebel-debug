@@ -3,6 +3,9 @@
 paho-mqtt 1.6.x: Client(...) ohne CallbackAPIVersion. paho laeuft ueber loop_start
 im eigenen Thread; alle Ergebnisse gehen ausschliesslich ueber Qt-Signale an die GUI.
 Das Passwort wird weder gespeichert noch geloggt.
+
+Produktiv-Firmware (fw "prod"): Befehle und Antworten laufen ueber prod_api (Topic-Wurzel
+heatingpump/). Debug-Firmware und unbekannte Firmware bleiben beim Praefix stiebel-debug/.
 """
 
 import json
@@ -11,10 +14,12 @@ import time
 import paho.mqtt.client as mqtt
 from PySide6.QtCore import QObject, Signal
 
+import prod_api
+
 TOPIC_PREFIX = "stiebel-debug/"
 
 # Topic-Wurzel der Produktiv-Firmware. Alle Produktiv-Topics leiten sich davon ab.
-PROD_ROOT = "heatingpump"
+PROD_ROOT = prod_api.PROD_ROOT
 
 RX_TOPICS = (
     "rx",
@@ -70,6 +75,11 @@ def _hex_index(value):
 def _opt_int(value):
     """Wie _to_int, aber fehlendes Feld (None) bleibt None."""
     return None if value is None else _to_int(value)
+
+
+def _prod_switch(switch):
+    """Produktiv: Switch None gilt als 0xFA; ungueltige Werte prueft prod_api."""
+    return prod_api.SWITCH_VALUE if switch is None else switch
 
 
 class ClockSync:
@@ -129,6 +139,14 @@ def _command_fields(fmt, switch) -> dict:
     return fields
 
 
+def _prod_check_format(fmt) -> None:
+    """Produktiv kennt nur das Format auto (Standard). short/long gibt es dort nicht."""
+    if fmt in ("short", "long"):
+        raise ValueError(f"Format {fmt!r} im Produktiv-Modus nicht verfuegbar")
+    if fmt not in (None, "auto"):
+        raise ValueError(f"unbekanntes Format: {fmt!r}")
+
+
 class MqttBridge(QObject):
     connected = Signal(bool)
     rx_frames = Signal(list)         # Liste von dict {"t","id"(int),"data"(bytes),"tx"(bool)}
@@ -141,6 +159,7 @@ class MqttBridge(QObject):
     availability_source = Signal(str)  # "debug" oder "produktiv", unmittelbar vor availability
     firmware_kind = Signal(str)      # "debug" | "prod" | "unknown"; nur bei Aenderung
     can_debug_state = Signal(bool)   # Produktiv-Sniffer an/aus (retained heatingpump/can_debug/state)
+    member_result = Signal(dict)     # Produktiv-Member-Scan: {"id","index","raw"} als int
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -149,6 +168,12 @@ class MqttBridge(QObject):
         self._fw: str = FW_UNKNOWN
         self._clock = ClockSync()
         self._now = time.time  # Ankunftszeit; in Tests ersetzbar
+        # Produktiv-Scan, den diese Bridge gesendet hat (None = keiner). Retained Altlasten
+        # des Brokers werden verworfen, solange kein scharfer Scan existiert.
+        # Form: {"kind": "range"|"members", "name": str (klein), "can_id": int|None,
+        #        "switch": int, "running": bool}
+        self._prod_scan: dict | None = None
+        self.stale_ignored = 0           # verworfene Scan-Nachrichten (Zaehler)
 
     # ------------------------------------------------------------------
     # Verbindung
@@ -157,6 +182,7 @@ class MqttBridge(QObject):
         self.disconnect_from()
         self._avail_by_source = {"debug": None, "produktiv": None}
         self._clock = ClockSync()
+        self._prod_scan = None
         self._set_firmware_kind(FW_UNKNOWN)
         client = mqtt.Client(client_id="", clean_session=True)
         client.on_connect = self._on_connect
@@ -174,6 +200,7 @@ class MqttBridge(QObject):
         client.loop_start()
 
     def disconnect_from(self) -> None:
+        self._prod_scan = None
         self._set_firmware_kind(FW_UNKNOWN)
         client = self._client
         self._client = None
@@ -226,7 +253,18 @@ class MqttBridge(QObject):
 
     def send_read(self, member: int, index: int, fmt=None, switch=None, src=None, timeout_ms=None) -> None:
         """fmt: None|"auto"|"short"|"long"; switch: None|0xFA|0xF8|0xF9. Ungueltige Werte: ValueError.
-        src: Absender-CAN-ID (None/0x680 = Standard), timeout_ms: 100..10000 (None/1000 = Standard)."""
+        src: Absender-CAN-ID (None/0x680 = Standard), timeout_ms: 100..10000 (None/1000 = Standard).
+
+        Produktiv: Rohtext auf heatingpump/raw/read. fmt short/long und src (ausser 0x680) gibt es
+        dort nicht (ValueError). timeout_ms entfaellt.
+        """
+        if self._fw == FW_PROD:
+            _prod_check_format(fmt)
+            if src is not None and src != prod_api.PC_CAN_ID:
+                raise ValueError("Absender (src) im Produktiv-Modus nicht verfuegbar")
+            self._publish_raw(prod_api.TOPIC_RAW_READ,
+                              prod_api.raw_read_payload(member, index, _prod_switch(switch)))
+            return
         payload = {
             "member": _hex_id(member),
             "index": _hex_index(index),
@@ -243,13 +281,20 @@ class MqttBridge(QObject):
         self._publish("cmd/read", payload)
 
     def send_write(self, member: int, index: int, value: int, fmt='auto') -> None:
-        """Schreibbefehl. Member 0..0x7FF (nicht 0x680), Index/Wert 0..0xFFFF, sonst ValueError."""
+        """Schreibbefehl. Member 0..0x7FF (nicht 0x680), Index/Wert 0..0xFFFF, sonst ValueError.
+        Produktiv: Rohtext auf heatingpump/raw/write; fmt muss 'auto' sein."""
         if not 0 <= member <= 0x7FF or member == 0x680:
             raise ValueError(f"ungueltiger Member: {member!r}")
         if not 0 <= index <= 0xFFFF:
             raise ValueError(f"Index ausserhalb 16 Bit: {index!r}")
         if not 0 <= value <= 0xFFFF:
             raise ValueError(f"Wert ausserhalb 16 Bit: {value!r}")
+        if self._fw == FW_PROD:
+            if fmt != 'auto':
+                raise ValueError(f"Format {fmt!r} im Produktiv-Modus nicht verfuegbar")
+            self._publish_raw(prod_api.TOPIC_RAW_WRITE,
+                              prod_api.raw_write_payload(member, index, value))
+            return
         payload = {
             "member": _hex_id(member),
             "index": _hex_index(index),
@@ -261,7 +306,23 @@ class MqttBridge(QObject):
 
     def send_scan(self, member: int, from_idx: int, to_idx: int, delay_ms: int,
                   fmt=None, switch=None) -> None:
-        """Wie send_read; ungueltige fmt/switch-Werte: ValueError."""
+        """Wie send_read; ungueltige fmt/switch-Werte: ValueError.
+
+        Produktiv: scan/start mit Bereich; delay_ms entfaellt. Der Scan wird scharf gesetzt.
+        """
+        if self._fw == FW_PROD:
+            _prod_check_format(fmt)
+            sw = _prod_switch(switch)
+            payload = prod_api.scan_start_payload(member, from_idx, to_idx, sw)
+            self._prod_scan = {
+                "kind": "range",
+                "name": prod_api.member_topic_name(member).lower(),
+                "can_id": member,
+                "switch": sw,
+                "running": False,
+            }
+            self._publish_raw(prod_api.TOPIC_SCAN_START, payload)
+            return
         payload = {
             "member": _hex_id(member),
             "from": _hex_index(from_idx),
@@ -271,7 +332,24 @@ class MqttBridge(QObject):
         payload.update(_command_fields(fmt, switch))
         self._publish("cmd/scan", payload)
 
+    def send_member_scan(self, lo: int = 0, hi: int = 0x7FF, index: int = 0x000B) -> None:
+        """Produktiv-Member-Scan (scan/members). Nur bei Produktiv-Firmware, sonst ValueError."""
+        if self._fw != FW_PROD:
+            raise ValueError("nur Produktiv-Firmware")
+        payload = prod_api.members_payload(lo, hi, index)
+        self._prod_scan = {
+            "kind": "members",
+            "name": "members",
+            "can_id": None,
+            "switch": prod_api.SWITCH_VALUE,
+            "running": False,
+        }
+        self._publish_raw(prod_api.TOPIC_SCAN_MEMBERS, payload)
+
     def send_stop(self) -> None:
+        if self._fw == FW_PROD:
+            self._publish_raw(prod_api.TOPIC_SCAN_STOP, "stop")
+            return
         self._publish("cmd/stop", {})
 
     # ------------------------------------------------------------------
@@ -294,10 +372,12 @@ class MqttBridge(QObject):
         return None
 
     def _set_firmware_kind(self, kind: str) -> None:
-        """Firmware-Art setzen; Signal nur bei Aenderung. Wechsel zu debug/prod wertet Verfuegbarkeit neu aus."""
+        """Firmware-Art setzen; Signal nur bei Aenderung. Wechsel zu debug/prod wertet Verfuegbarkeit neu aus.
+        Bei Wechsel ist ein Produktiv-Scan nicht mehr gueltig und wird geloescht."""
         if kind == self._fw:
             return
         self._fw = kind
+        self._prod_scan = None
         self.firmware_kind.emit(kind)
         if kind in (FW_DEBUG, FW_PROD):
             combined = self._combined_availability()
@@ -326,7 +406,8 @@ class MqttBridge(QObject):
                     client.subscribe(TOPIC_PREFIX + topic, qos=0)
                 except Exception:
                     pass
-            for topic in (PROD_AVAILABILITY_TOPIC, PROD_CAN_DEBUG_FRAMES, PROD_CAN_DEBUG_STATE):
+            for topic in (PROD_AVAILABILITY_TOPIC, PROD_CAN_DEBUG_FRAMES, PROD_CAN_DEBUG_STATE,
+                          prod_api.TOPIC_RAW_RESULT, prod_api.TOPIC_SCAN_WILDCARD):
                 try:
                     client.subscribe(topic, qos=0)
                 except Exception:
@@ -334,6 +415,7 @@ class MqttBridge(QObject):
         self.connected.emit(rc == 0)
 
     def _on_disconnect(self, client, userdata, rc):
+        self._prod_scan = None
         self._set_firmware_kind(FW_UNKNOWN)
         self.connected.emit(False)
 
@@ -380,6 +462,106 @@ class MqttBridge(QObject):
         if frames:
             self.rx_frames.emit(frames)
 
+    # ---- Produktiv: Scan-Zustand und Antworten --------------------------
+
+    @staticmethod
+    def _scan_matches(scan: dict, status: dict) -> bool:
+        """Passt der Scan-Status (mode, member) zum gesendeten Scan?"""
+        if scan["kind"] == "members":
+            return status["mode"] == "members"
+        return status["mode"] == "range" and status["member"].lower() == scan["name"]
+
+    def _handle_raw_result(self, text: str) -> None:
+        """heatingpump/raw/result: Antwort auf raw/read oder raw/write. Ohne Scharf-Pruefung."""
+        obj = prod_api.parse_raw_result(text)
+        if obj is None:
+            return
+        if obj["op"] == "read":
+            self.read_result.emit({
+                "member": obj["id"],
+                "index": obj["index"],
+                "raw": obj["raw"] if obj["raw"] is not None else 0,
+                "switch": obj["switch"],
+                "src": prod_api.PC_CAN_ID,
+                "status": obj["status"],
+            })
+        elif obj["op"] == "write":
+            self.write_result.emit({
+                "member": obj["id"],
+                "index": obj["index"],
+                "value": obj["value"],
+                "status": obj["status"],
+                "ack": obj["ack"],
+                "readback": obj["readback"],
+            })
+
+    def _handle_scan_status(self, text: str) -> None:
+        """heatingpump/scan/status. Ohne scharfen Scan oder ohne passendes running: verwerfen."""
+        status = prod_api.parse_scan_status(text)
+        if status is None:
+            return
+        scan = self._prod_scan
+        if scan is None or not self._scan_matches(scan, status):
+            self.stale_ignored += 1
+            return
+        if not scan["running"]:
+            if status["state"] != "running":
+                self.stale_ignored += 1
+                return
+            scan["running"] = True
+        out = dict(status)
+        out["switch"] = scan["switch"]
+        self.scan_progress.emit(out)
+        if status["state"] != "running":
+            self._prod_scan = None
+
+    def _handle_scan_result(self, parsed, text: str) -> None:
+        """heatingpump/scan/<name>/0x<idx>[/f8|/f9]: nur fuer den laufenden Bereichs-Scan."""
+        name, index, switch = parsed
+        result = prod_api.parse_scan_result(text)
+        if result is None:
+            return
+        scan = self._prod_scan
+        if (scan is None or not scan["running"] or scan["kind"] != "range"
+                or name.lower() != scan["name"] or switch != scan["switch"]):
+            self.stale_ignored += 1
+            return
+        self.scan_result.emit({
+            "member": scan["can_id"],
+            "switch": switch,
+            "items": [{
+                "index": index,
+                "raw": result["raw"],
+                "status": "ok",
+                "switch": switch,
+                "name": result["name"],
+                "value": result["value"],
+            }],
+        })
+
+    def _handle_member_result(self, can_id: int, text: str) -> None:
+        """heatingpump/scan/members/0x<id>: nur fuer den laufenden Member-Scan."""
+        result = prod_api.parse_member_result(text)
+        if result is None:
+            return
+        scan = self._prod_scan
+        if scan is None or not scan["running"] or scan["kind"] != "members":
+            self.stale_ignored += 1
+            return
+        self.member_result.emit({"id": can_id, "index": result["index"], "raw": result["raw"]})
+
+    def _handle_prod_scan(self, topic: str, text: str) -> None:
+        if topic == prod_api.TOPIC_SCAN_STATUS:
+            self._handle_scan_status(text)
+            return
+        can_id = prod_api.parse_member_topic(topic)
+        if can_id is not None:
+            self._handle_member_result(can_id, text)
+            return
+        parsed = prod_api.parse_scan_result_topic(topic)
+        if parsed is not None:
+            self._handle_scan_result(parsed, text)
+
     def _on_message(self, client, userdata, msg):
         """Nachricht verarbeiten. Fehlerhafte Nachrichten werden ignoriert.
 
@@ -396,6 +578,12 @@ class MqttBridge(QObject):
                 return
             if topic == PROD_CAN_DEBUG_FRAMES:
                 self._handle_frames(json.loads(msg.payload.decode("utf-8")))
+                return
+            if topic == prod_api.TOPIC_RAW_RESULT:
+                self._handle_raw_result(msg.payload.decode("utf-8"))
+                return
+            if self._fw == FW_PROD and topic.startswith(PROD_ROOT + "/scan/"):
+                self._handle_prod_scan(topic, msg.payload.decode("utf-8"))
                 return
             if not topic.startswith(TOPIC_PREFIX):
                 return

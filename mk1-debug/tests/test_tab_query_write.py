@@ -173,16 +173,20 @@ def test_send_enabled_with_arm_and_debug(qapp, db, fake_elster):
     assert "0x0208" in tab._preview_label.text()
 
 
-def test_send_blocked_in_prod_firmware(qapp, db, fake_elster):
+def test_send_enabled_in_prod_firmware_after_arm(qapp, db, fake_elster, monkeypatch):
+    monkeypatch.setattr(tab_query.QueryTab, "_confirm_write", lambda self, text: True)
     fake = FakeBridge()
     tab = _write_tab(db, fake)
     fake.firmware_kind.emit("prod")
+    assert not tab._arm_check.isChecked()  # Firmwarewechsel entschaerft
     assert not tab._send_btn.isEnabled()
-    assert not tab._value_edit.isEnabled()
-    assert not tab._arm_check.isEnabled()
-    assert not tab._fw_label.isHidden()
+    assert tab._value_edit.isEnabled()
+    assert tab._arm_check.isEnabled()
+    assert tab._fw_label.isHidden()
+    tab._arm_check.setChecked(True)
+    assert tab._send_btn.isEnabled()
     tab._on_send()
-    assert fake.writes == []
+    assert fake.writes == [(SPEICHER, INDEX, 0x0208, "auto")]
 
 
 def test_arm_reset_on_firmware_change(qapp, db, fake_elster):

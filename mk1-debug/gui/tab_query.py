@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from elster import ElsterDb, decode_value, switch_label
-from mqtt_client import FW_DEBUG, FW_UNKNOWN, MqttBridge
+from mqtt_client import FW_DEBUG, FW_PROD, FW_UNKNOWN, MqttBridge
 
 try:
     from elster import build_write_request, encode_value, is_writable
@@ -42,15 +42,22 @@ except ImportError:  # Schreibfunktionen in elster.py fehlen noch: Schreiben ble
 
 MAX_HISTORY = 1000
 FW_LOCK_TEXT = {
-    "prod": "Nur mit Debug-Firmware moeglich: die Produktiv-Firmware beantwortet keine Abfragen.",
     FW_UNKNOWN: "Warte auf Status der Firmware...",
 }
+# Produktiv-Firmware (raw/read): diese Optionen gibt es dort nicht, sie bleiben deaktiviert.
+PROD_OFF_TIP = "Im Produktiv-Modus nicht verfuegbar: die Produktiv-Firmware (raw/read) kennt {}."
+# Reihenfolge wie self._prod_off: Absender, Timeout, Format
+PROD_OFF_WHAT = ("kein Absender-Feld", "keinen Timeout", "kein Format kurz/lang")
 DEFAULT_TYPE = "et_default"
 STATUS_TEXT = {
     "ok": "ok",
     "unsupported": "nicht unterstützt",
     "timeout": "Timeout",
+    "busy": "Firmware beschäftigt (Scan läuft)",
 }
+REJECTED_TEXT = ("Schreiben abgelehnt (Status rejected): Firmware ohne can_raw_write gebaut "
+                 "oder Sperrregel der Firmware.")
+PROD_CONFIRM_LINE = "Firmware: Produktiv (raw/write, Ergebnis kann 'rejected' sein)"
 WRITE_ACK_TEXT = {2: "response", 3: "ack", 4: "write ack", 5: "write respond"}
 HEADERS = ["Zeit", "Modus", "Member", "Index", "Switch", "Name", "Typ", "Roh hex", "Roh dez",
            "Wert", "Ack", "Rücklesewert", "Status"]
@@ -200,6 +207,9 @@ class QueryTab(QWidget):
 
         self._hint_label = QLabel("")
         self._hint_label.setWordWrap(True)
+        self._warn_label = QLabel("")  # Schreib-Status 'rejected': Warnfarbe, sonst leer
+        self._warn_label.setWordWrap(True)
+        self._warn_label.setStyleSheet("color: #c00000; font-weight: bold;")
 
         self._fw_label = QLabel("")
         self._fw_label.setWordWrap(True)
@@ -222,6 +232,9 @@ class QueryTab(QWidget):
         # Firmware-Sperre: Lesen-Controls plus Moduswahl; Schreib-Eingaben einzeln in _update_write_ui.
         self._lockable = (self._mode_combo, self._member_combo, self._index_edit, self._format_combo,
                           self._switch_combo, self._query_btn, self._src_combo, self._timeout_spin)
+        # Im Produktiv-Modus nicht verfuegbar (deaktiviert mit Tooltip); Originaltooltips merken.
+        self._prod_off = (self._src_combo, self._timeout_spin, self._format_combo)
+        self._default_tips = {w: w.toolTip() for w in self._prod_off}
 
         form = QFormLayout()
         form.addRow("Modus:", self._mode_combo)
@@ -253,6 +266,7 @@ class QueryTab(QWidget):
         result_layout = QVBoxLayout(result_box)
         result_layout.addWidget(self._info_label)
         result_layout.addWidget(self._hint_label)
+        result_layout.addWidget(self._warn_label)
 
         self._table = QTableWidget(0, len(HEADERS))
         self._table.setHorizontalHeaderLabels(HEADERS)
@@ -293,22 +307,36 @@ class QueryTab(QWidget):
     # ----- Firmware-Sperre -------------------------------------------------
 
     def _apply_firmware(self, kind: str) -> None:
-        """Abfrage-Bedienelemente nur bei Debug-Firmware aktiv; Hinweis bei prod/unknown."""
+        """Abfrage-Bedienelemente bei Debug- und Produktiv-Firmware aktiv; Hinweis nur bei unknown."""
         self._fw = kind
-        if kind != FW_DEBUG and self._seq is not None:
-            self._seq_abort("Abfrage 'alle' abgebrochen: Firmware ist nicht Debug.")
+        if kind not in (FW_DEBUG, FW_PROD) and self._seq is not None:
+            self._seq_abort("Abfrage 'alle' abgebrochen: Firmware-Status unbekannt.")
         self._write_pending = False  # Firmwarewechsel: Antwort auf offenen Schreibauftrag unsicher
         self._disarm()
+        if kind == FW_PROD:
+            self._reset_prod_options()
         self._apply_lock()
+
+    def _fw_ok(self) -> bool:
+        return self._fw in (FW_DEBUG, FW_PROD)
+
+    def _reset_prod_options(self) -> None:
+        """Produktiv: nicht verfuegbare Optionen auf Standardwerte (src 0x680, Format auto, Timeout 1000)."""
+        self._src_combo.setCurrentIndex(0)  # PC (0x680)
+        self._format_combo.setCurrentIndex(self._format_combo.findData("auto"))
+        self._timeout_spin.setValue(1000)
 
     def _on_connected(self, online: bool) -> None:
         if not online:
             self._disarm()
 
     def _apply_lock(self) -> None:
-        allowed = self._fw == FW_DEBUG
+        allowed = self._fw_ok()
+        prod = self._fw == FW_PROD
         for widget in self._lockable:
-            widget.setEnabled(allowed)
+            widget.setEnabled(allowed and not (prod and widget in self._prod_off))
+        for widget, what in zip(self._prod_off, PROD_OFF_WHAT):
+            widget.setToolTip(PROD_OFF_TIP.format(what) if prod else self._default_tips[widget])
         if self._seq is not None:  # Firmware beantwortet nur eine Anfrage gleichzeitig
             self._query_btn.setEnabled(False)
             self._mode_combo.setEnabled(False)
@@ -327,12 +355,13 @@ class QueryTab(QWidget):
     def _on_mode_changed(self, _index: int) -> None:
         self._disarm()
         self._hint_label.setText("")
+        self._warn_label.setText("")
         self._update_write_ui()
 
     def _update_write_ui(self) -> None:
         """Sichtbarkeit, Vorschau und Sendefreigabe aus Modus, Firmware und Eingaben."""
         write = self._mode() == MODE_WRITE
-        allowed = self._fw == FW_DEBUG
+        allowed = self._fw_ok()
         for widget in self._read_only:
             widget.setVisible(not write)
         for widget in self._write_only:
@@ -408,6 +437,8 @@ class QueryTab(QWidget):
             f"Rohwert: 0x{plan['raw']:04x} ({plan['raw']})",
             f"Frame: 0x{plan['can_id']:03x}  {bytes(plan['frame']).hex(' ')}",
         ]
+        if self._fw == FW_PROD:
+            lines.insert(1, PROD_CONFIRM_LINE)
         last = self._last_read.get((member, index))
         if last is not None:
             lines.append(f"Letzter gelesener Wert: {last}")
@@ -437,6 +468,7 @@ class QueryTab(QWidget):
             self._hint_label.setText(f"Senden abgelehnt: {exc}")
             return
         self._write_pending = True
+        self._warn_label.setText("")
         self._info_label.setText(
             f"Schreibauftrag gesendet: Member 0x{plan['member']:03x}, Index 0x{plan['index']:04x}, "
             f"Rohwert 0x{plan['raw']:04x} ..."
@@ -471,6 +503,7 @@ class QueryTab(QWidget):
             f"Ack: {ack_text}   Rücklesewert: {readback_text}\n"
             f"Status: {status}"
         )
+        self._warn_label.setText(REJECTED_TEXT if status == "rejected" else "")
         self._add_history_row([
             datetime.now().strftime("%H:%M:%S"),
             "Schreiben",
@@ -711,7 +744,9 @@ class QueryTab(QWidget):
 
         if status == "unsupported" and raw is None:
             raw = 0x8000
-        value_text = self._decode(type_name, raw, index) if status != "timeout" else "–"
+        if status == "busy":
+            raw = None  # Prod-Firmware liefert ohne Rohwert 0; bei busy kein Wert anzeigen
+        value_text = self._decode(type_name, raw, index) if status not in ("timeout", "busy") else "–"
         member_text = self._db.member_name(member) if member is not None else "–"
         status_text = STATUS_TEXT.get(status, status or "–")
         raw_hex = f"0x{raw:04x}" if raw is not None else "–"

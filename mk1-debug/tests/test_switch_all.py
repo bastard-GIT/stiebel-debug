@@ -169,13 +169,29 @@ def test_query_all_button_locked_during_sequence(qapp, db, monkeypatch):
     assert tab._query_btn.isEnabled()
 
 
-def test_query_all_firmware_prod_aborts(qapp, db, monkeypatch):
+def test_query_all_firmware_prod_keeps_sequence(qapp, db, monkeypatch):
+    # Produktiv-Firmware (raw/read) beantwortet alle drei Switches: Sequenz laeuft weiter.
     monkeypatch.setattr(tab_query, "SEQ_TIMEOUT_MS", 30)
     fake = FakeBridge()
     tab = _query_tab(db, fake)
     tab._on_query()
     fake.firmware_kind.emit("prod")
     assert not tab._query_btn.isEnabled()
+    fake.read_result.emit(_read(tab, FA))
+    assert len(fake.reads) == 2
+    fake.read_result.emit(_read(tab, F8))
+    fake.read_result.emit(_read(tab, F9))
+    assert len(fake.reads) == 3
+    assert tab._query_btn.isEnabled()
+
+
+def test_query_all_firmware_unknown_aborts(qapp, db, monkeypatch):
+    monkeypatch.setattr(tab_query, "SEQ_TIMEOUT_MS", 30)
+    fake = FakeBridge()
+    tab = _query_tab(db, fake)
+    tab._on_query()
+    fake.firmware_kind.emit("unknown")
+    assert not tab._query_btn.isEnabled()  # Bedienelemente gesperrt
     fake.read_result.emit(_read(tab, FA))
     QTest.qWait(120)  # Timeout-Timer darf nach dem Abbruch nichts mehr senden
     assert len(fake.reads) == 1
