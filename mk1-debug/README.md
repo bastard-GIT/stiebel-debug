@@ -103,7 +103,7 @@ Danach prüfen, ob die Werte wieder in Home Assistant erscheinen.
 
 ## Bedienung der GUI
 
-Die GUI ist ausgezogen in das eigene Repo [ha-stiebel-control-gui](https://github.com/bastard-GIT/ha-stiebel-control-gui) (Installation, Start, Tabs: dessen README, deutsch: README.de.md). Sie spricht sowohl diese Debug-Firmware (Präfix `stiebel-debug/`) als auch die Produktiv-Firmware (`heatingpump/`) an.
+Die GUI ist ausgezogen in das eigene Repo [ha-stiebel-control-gui](https://github.com/bastard-GIT/ha-stiebel-control-gui) (Installation, Start, Tabs: dessen README, deutsch: docs/README.de.md). Sie spricht sowohl diese Debug-Firmware (Präfix `stiebel-debug/`) als auch die Produktiv-Firmware (`heatingpump/`) an.
 
 ## MQTT-Topics
 

@@ -62,7 +62,7 @@ IP-Adressen sind durch `<ip-mk1>` und `<ip-broker>` ersetzt.
 ### Debug-GUI (ausgezogen)
 
 Die PySide6-GUI für die Bus-Analyse (früher `mk1-debug/gui`) liegt seit 2026-11-24 im eigenen Repo
-[ha-stiebel-control-gui](https://github.com/bastard-GIT/ha-stiebel-control-gui) (Installation, Start, Referenztabelle `ElsterTable.json`, Tests: dessen README, deutsch: `README.de.md`).
+[ha-stiebel-control-gui](https://github.com/bastard-GIT/ha-stiebel-control-gui) (Installation, Start, Referenztabelle `ElsterTable.json`, Tests: dessen README, deutsch: `docs/README.de.md`).
 Sie spricht die Debug-Firmware (`stiebel-debug/`) und die Produktiv-Firmware (`heatingpump/`) an.
 `mk1-debug/tools/` und `mk1-debug/run_full.py` importieren GUI-Module und brauchen dafür eine Kopie von `gui/` aus dem neuen Repo.
 
